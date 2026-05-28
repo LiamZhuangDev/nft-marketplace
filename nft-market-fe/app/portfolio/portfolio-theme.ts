@@ -1,0 +1,33 @@
+import type { CSSProperties } from "react";
+
+export const portfolioThemeVars = {
+  "--pf-bg-0": "#0b0e15",
+  "--pf-bg-1": "#101522",
+  "--pf-bg-2": "#0f1117",
+  "--pf-bg-main": "#0f1117",
+  "--pf-bg-sidebar": "#121622",
+  "--pf-surface": "#171c29",
+  "--pf-surface-translucent": "rgba(23, 28, 41, 0.9)",
+  "--pf-surface-muted": "#141926",
+  "--pf-surface-elevated": "#1b2131",
+  "--pf-surface-soft": "#202637",
+  "--pf-surface-strong": "#262d40",
+  "--pf-border": "#2a3040",
+  "--pf-border-soft": "#2f3548",
+  "--pf-border-strong": "#3a435c",
+  "--pf-border-card": "#384056",
+  "--pf-text-primary": "#f8fafc",
+  "--pf-text-secondary": "#cbd5e1",
+  "--pf-text-muted": "#94a3b8",
+  "--pf-accent": "#a78bfa",
+  "--pf-accent-strong": "#8b5cf6",
+  "--pf-accent-soft": "rgba(167, 139, 250, 0.16)",
+  "--pf-accent-border": "rgba(167, 139, 250, 0.5)",
+  "--pf-accent-border-soft": "rgba(167, 139, 250, 0.32)",
+  "--pf-accent-border-faint": "rgba(167, 139, 250, 0.24)",
+  "--pf-accent-gradient-from": "rgba(167, 139, 250, 0.6)",
+  "--pf-accent-gradient-to": "rgba(139, 92, 246, 0.6)",
+  "--pf-accent-shadow": "rgba(167, 139, 250, 0.25)",
+  "--pf-success-soft": "rgba(52, 211, 153, 0.16)",
+} as CSSProperties;
+
