@@ -53,7 +53,7 @@ flowchart TD
 
 ## Order Types
 - List order: Seller locks one ERC721 in the vault and waits for a buyer.
-- Offer order: Buyer locks ETH in the vault and waits for a seller.
+- Offer order: Buyer locks ETH in the vault and waits for a seller. A buyer pre-creates/deposits a Bid order when they are not doing “buy now,” but making an offer.
     - `FixedPriceForItem`: order targets a specific tokenId.
     - `FixedPriceForCollection`: bid can match any token in the collection.
 
@@ -284,6 +284,8 @@ flowchart TD
     L -->|No| M[Move to next best price]
     M --> F
 ```
+## To Do
+- The escrow-first is clean and reliable, especially for a learning/orderbook-style contract. But production NFT marketplaces usually prefer signed off-chain orders plus approval-based settlement, because locking every NFT/ETH is heavy for users. A hybrid design is often the sweet spot.
 ---
 # EasySwap Hardhat Project
 
