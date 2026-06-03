@@ -17,11 +17,16 @@ contract OrderState {
     }
 
     function _updateFilledAmount(OrderKey orderKey, uint256 amount) internal {
-        require(amount != CANCELLED, "order cancelled");
+        require(filledAmount[orderKey] != CANCELLED, "order cancelled");
+        require(amount != CANCELLED, "invalid filled amount");
         filledAmount[orderKey] = amount;
     }
 
     function _cancelOrder(OrderKey orderKey) internal {
         filledAmount[orderKey] = CANCELLED;
+    }
+
+    function _isCancelled(OrderKey orderKey) internal view returns (bool) {
+        return filledAmount[orderKey] == CANCELLED;
     }
 }
