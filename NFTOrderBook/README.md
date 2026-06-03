@@ -3,6 +3,8 @@
 ## Overview
 This reimplements `EasySwapContract` for practice purpose.
 
+## Rebuild Steps
+- Init a Hardhat v2 project
 ```bash
 mkdir NFTOrderBook
 cd NFTOrderBook
@@ -23,7 +25,42 @@ NFTOrderBook/
   hardhat.config.js
   package.json
 ```
-Install OpenZeppelin if not already:
+- Install dependencies
 ```bash
 npm install --save-dev @openzeppelin/contracts
+```
+
+- Create contracts
+```
+contracts
+   |_______interfaces
+   |           |_____INFTEscrwVault.sol
+   |           |_____IOrderBook.sol
+   |           |_____IOrderStorage.sol
+   |_______libraries
+   |           |_____OrderHashing.sol
+   |           |_____OrderTypes.sol
+   |           |_____OrderValidator.sol
+   |_______NFTEscrowVault.sol
+   |_______OrderBook.sol
+   |_______OrderState.sol
+   |_______OrderStorage.sol
+   |_______ProtocolFeeManager.sol
+```
+- Deploy to Hardhat’s default in-memory local network.
+```bash
+cd NFTOrderBook
+npx hardhat run scripts/deploy.js
+
+Deploying with account: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+NFTEscrowVault deployed to: 0x5FbDB2315678afecb367f032d93F642f64180aa3
+OrderBook deployed to: 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512
+Vault orderBook set to: 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512
+```
+- Deploy to a persistent local network
+```bash
+npx hardhat node
+
+# in another terminal
+npx hardhat run script/deploy.js --network localhost
 ```

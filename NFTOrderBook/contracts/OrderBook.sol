@@ -44,6 +44,8 @@ contract OrderBook is OrderStorage, OrderState, ProtocolFeeManager {
             if (msg.value > requiredETH) {
                 payable(order.maker).transfer(msg.value - requiredETH);
             }
+        } else {
+            revert("invalid order side");
         }
 
         // save order to storage

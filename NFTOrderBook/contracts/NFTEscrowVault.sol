@@ -12,10 +12,7 @@ contract NFTEscrowVault is INFTEscrowVault, Ownable, IERC721Receiver {
     mapping(OrderKey => uint256) public NFTBalance;
     address public orderBook;
 
-    constructor(address _orderBook) Ownable(msg.sender) {
-        require(_orderBook != address(0), "OrderBook: zero address");
-        orderBook = _orderBook;
-    }
+    constructor() Ownable(msg.sender) {}
 
     modifier onlyOrderBook() {
         require(msg.sender == orderBook, "NFTEscrowVault: only order book can call");
