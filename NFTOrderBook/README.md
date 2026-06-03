@@ -64,3 +64,15 @@ npx hardhat node
 # in another terminal
 npx hardhat run script/deploy.js --network localhost
 ```
+
+- Create test script
+```bash
+test
+   |_______OrderBook.js
+```
+
+- Run test
+```bash
+cd NFTOrderBook
+npm test
+```
