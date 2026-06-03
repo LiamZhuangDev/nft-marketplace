@@ -20,7 +20,7 @@ library OrderHashing {
                 asset.collection,
                 asset.amount
             )
-        )
+        );
     }
 
     function hashOrder(OrderTypes.Order memory order) internal pure returns (OrderKey) {

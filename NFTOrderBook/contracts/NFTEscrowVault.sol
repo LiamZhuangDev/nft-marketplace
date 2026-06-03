@@ -5,11 +5,17 @@ import {OrderKey} from "./libraries/OrderTypes.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC721} from "@openzeppelin/contracts/interfaces/IERC721.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/interfaces/IERC721Receiver.sol";
+import {INFTEscrowVault} from "./interfaces/INFTEscrowVault.sol";
 
-contract NFTEscrowVault is Ownable, IERC721Receiver {
+contract NFTEscrowVault is INFTEscrowVault, Ownable, IERC721Receiver {
     mapping(OrderKey => uint256) public ETHBalance;
     mapping(OrderKey => uint256) public NFTBalance;
     address public orderBook;
+
+    constructor(address _orderBook) Ownable(msg.sender) {
+        require(_orderBook != address(0), "OrderBook: zero address");
+        orderBook = _orderBook;
+    }
 
     modifier onlyOrderBook() {
         require(msg.sender == orderBook, "NFTEscrowVault: only order book can call");
@@ -22,7 +28,7 @@ contract NFTEscrowVault is Ownable, IERC721Receiver {
     }
 
     function depositETH(OrderKey orderKey, uint256 amount) external payable onlyOrderBook {
-        require(msg.value >= amount, "NFTEscrowVault: insufficient ETH sent");
+        require(msg.value == amount, "NFTEscrowVault: insufficient ETH sent");
         ETHBalance[orderKey] += amount;
     }
 
@@ -43,12 +49,16 @@ contract NFTEscrowVault is Ownable, IERC721Receiver {
         IERC721(collection).safeTransferFrom(address(this), to, tokenId);
     }
 
+    function transferNFT(address from, address to, address collection, uint256 tokenId) external onlyOrderBook {
+        IERC721(collection).safeTransferFrom(from, to, tokenId);
+    }
+
     // @dev Implement IERC721Receiver to accept safe transfers of NFTs
     function onERC721Received(
-        address operator,
-        address from,
-        uint256 tokenId,
-        bytes calldata data
+        address,
+        address,
+        uint256,
+        bytes calldata
     ) external pure returns (bytes4) {
         return IERC721Receiver.onERC721Received.selector;
     }
