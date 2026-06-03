@@ -7,13 +7,17 @@ import {OrderHashing} from "./libraries/OrderHashing.sol";
 import {INFTEscrowVault} from "./interfaces/INFTEscrowVault.sol";
 import {OrderStorage} from "./OrderStorage.sol";
 import {OrderState} from "./OrderState.sol";
+import {ProtocolFeeManager} from "./ProtocolFeeManager.sol";
 
-contract OrderBook is OrderStorage, OrderState {
+contract OrderBook is OrderStorage, OrderState, ProtocolFeeManager {
     address public nftEscrowVault;
-
-    constructor(address _nftEscrowVault) {
+    address public protocolFeeRecipient;
+    
+    constructor(address _nftEscrowVault, address _protocolFeeRecipient) {
         require(_nftEscrowVault != address(0), "NFTEscrowVault: zero address");
+        require(_protocolFeeRecipient != address(0), "ProtocolFeeRecipient: zero address");
         nftEscrowVault = _nftEscrowVault;
+        protocolFeeRecipient = _protocolFeeRecipient;
     }
 
     function createOrder(OrderTypes.Order memory order) external payable {
@@ -29,17 +33,24 @@ contract OrderBook is OrderStorage, OrderState {
                 order.nft.tokenId
             );
         } else if (order.side == OrderTypes.Side.Offer) {
-            INFTEscrowVault(nftEscrowVault).depositETH{value: msg.value}(
+            uint256 requiredETH = uint256(order.price) * order.nft.amount;
+            require(msg.value >= requiredETH, "insufficient ETH sent");
+
+            INFTEscrowVault(nftEscrowVault).depositETH{value: requiredETH}(
                 OrderHashing.hashOrder(order),
-                msg.value
+                requiredETH
             );
+
+            if (msg.value > requiredETH) {
+                payable(order.maker).transfer(msg.value - requiredETH);
+            }
         }
 
         // save order to storage
         _addOrder(order);
     }
 
-    function matchOrder(OrderTypes.Order calldata listing, OrderTypes.Order calldata offer) external payable{
+    function matchOrder(OrderTypes.Order calldata listing, OrderTypes.Order calldata offer) external payable {
         OrderValidator._validateOrder(listing, false);
         OrderValidator._validateOrder(offer, false);
 
@@ -68,7 +79,7 @@ contract OrderBook is OrderStorage, OrderState {
         }
     }
 
-    // @dev Buyer accepts listing: listing must exist and not cancelled, offer must not exist, buyer sends fresh ETH equal or above listing price
+    // @dev Buyer accepts listing: listing must exist and not cancelled; offer must NOT exist, buyer sends fresh ETH equal or above listing price
     function _buyerAcceptsListing(
         OrderTypes.Order calldata listing,
         OrderTypes.Order calldata offer,
@@ -83,7 +94,12 @@ contract OrderBook is OrderStorage, OrderState {
         _updateFilledAmount(listingKey, listing.nft.amount);
         _removeOrder(listing);
 
-        payable(listing.maker).transfer(listing.price);
+        (uint256 sellerAmount, uint256 protocolFee) = _splitPayment(listing.price);
+        payable(listing.maker).transfer(sellerAmount);
+        if (protocolFee > 0) {
+            payable(protocolFeeRecipient).transfer(protocolFee);
+        }
+
         INFTEscrowVault(nftEscrowVault).withdrawNFT(
             listingKey,
             offer.maker,
@@ -135,11 +151,24 @@ contract OrderBook is OrderStorage, OrderState {
             _removeOrder(offer);
         }
 
+        (uint256 sellerAmount, uint256 protocolFee) = _splitPayment(offer.price);
         INFTEscrowVault(nftEscrowVault).withdrawETH(
             offerKey,
-            offer.price,
+            sellerAmount,
             listing.maker
         );
+        if (protocolFee > 0) {
+            INFTEscrowVault(nftEscrowVault).withdrawETH(
+                offerKey,
+                protocolFee,
+                protocolFeeRecipient
+            );
+        }
+    }
+
+    function _splitPayment(uint256 price) internal view returns (uint256 sellerAmount, uint256 protocolFee) {
+        protocolFee = (price * protocolFeeBps) / 10_000;
+        sellerAmount = price - protocolFee;
     }
 
     function cancelOrder(OrderKey orderKey) external {
@@ -162,7 +191,7 @@ contract OrderBook is OrderStorage, OrderState {
         } else if (order.side == OrderTypes.Side.Offer) {
             INFTEscrowVault(nftEscrowVault).withdrawETH(
                 orderKey,
-                order.price,
+                uint256(order.price) * order.nft.amount,
                 order.maker
             );
         }

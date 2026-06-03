@@ -9,7 +9,7 @@ import {OrderTypes, OrderKey} from "./libraries/OrderTypes.sol";
 // filledAmount[key] == type(uint256).max  -> cancelled
 contract OrderState {
     uint256 private constant CANCELLED = type(uint256).max;
-    mapping(OrderKey => uint256) public filledAmount;
+    mapping(OrderKey => uint256) public filledAmount; // orderKey => filledAmount, mutable order execution state
 
     function _getFilledAmount(OrderKey orderKey) internal view returns (uint256 amount) {
         amount = filledAmount[orderKey];
