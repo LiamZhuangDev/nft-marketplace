@@ -1,0 +1,31 @@
+[app]
+name = "NFTOrderBookIndexer"
+environment = "local"
+
+[log]
+level = "info"
+
+[db]
+host = "127.0.0.1"
+port = 3306
+database = "easyswap"
+user = "easyuser"
+password = "easypasswd"
+
+[redis]
+host = "127.0.0.1:6379"
+password = ""
+db = 0
+
+[chain]
+name = "sepolia"
+id = 11155111
+rpc_url = "https://rpc.ankr.com/eth_sepolia"
+safe_block_confirmations = 8
+start_block = 0
+
+[contract]
+orderbook_address = "0x0000000000000000000000000000000000000000"
+vault_address = "0x0000000000000000000000000000000000000000"
+eth_address = "0x0000000000000000000000000000000000000000"
+weth_address = "0x0000000000000000000000000000000000000000"
