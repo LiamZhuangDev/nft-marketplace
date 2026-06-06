@@ -1,11 +1,11 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
+	"nft-orderbook-indexer/internal/app"
 	appconfig "nft-orderbook-indexer/internal/config"
 )
 
@@ -19,13 +19,13 @@ var daemonCmd = &cobra.Command{
 			return err
 		}
 
-		pretty, err := json.MarshalIndent(cfg, "", "  ")
-		if err != nil {
+		if err := app.CheckDependencies(cmd.Context(), cfg); err != nil {
 			return err
 		}
 
 		fmt.Println("config loaded successfully")
-		fmt.Println(string(pretty))
+		fmt.Printf("mysql connected: %s:%d/%s\n", cfg.DB.Host, cfg.DB.Port, cfg.DB.Database)
+		fmt.Printf("redis connected: %s db=%d\n", cfg.Redis.Host, cfg.Redis.DB)
 		return nil
 	},
 }
