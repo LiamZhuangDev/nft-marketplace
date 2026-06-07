@@ -23,6 +23,7 @@ id = 11155111
 rpc_url = "https://sepolia.infura.io/v3/your_api_key"
 safe_block_confirmations = 8
 start_block = 0
+max_block_range = 100
 
 [contract]
 orderbook_address = "0x0000000000000000000000000000000000000000"

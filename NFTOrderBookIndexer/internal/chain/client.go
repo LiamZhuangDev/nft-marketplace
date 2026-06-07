@@ -3,7 +3,11 @@ package chain
 import (
 	"context"
 	"fmt"
+	"math/big"
 
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"nft-orderbook-indexer/internal/config"
@@ -24,6 +28,16 @@ func Dial(ctx context.Context, cfg config.ChainConfig) (*Client, error) {
 
 func (c *Client) CurrentBlock(ctx context.Context) (uint64, error) {
 	return c.eth.BlockNumber(ctx)
+}
+
+func (c *Client) FilterLogs(ctx context.Context, fromBlock, toBlock uint64, address string) ([]types.Log, error) {
+	query := ethereum.FilterQuery{
+		FromBlock: new(big.Int).SetUint64(fromBlock),
+		ToBlock:   new(big.Int).SetUint64(toBlock),
+		Addresses: []common.Address{common.HexToAddress(address)},
+	}
+
+	return c.eth.FilterLogs(ctx, query)
 }
 
 func (c *Client) Close() {

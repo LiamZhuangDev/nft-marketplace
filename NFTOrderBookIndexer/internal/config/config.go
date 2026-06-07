@@ -45,6 +45,7 @@ type ChainConfig struct {
 	RPCURL                 string `mapstructure:"rpc_url" json:"rpc_url"`
 	SafeBlockConfirmations uint64 `mapstructure:"safe_block_confirmations" json:"safe_block_confirmations"`
 	StartBlock             uint64 `mapstructure:"start_block" json:"start_block"`
+	MaxBlockRange          uint64 `mapstructure:"max_block_range" json:"max_block_range"`
 }
 
 type ContractConfig struct {
@@ -70,12 +71,19 @@ func Load(path string) (*Config, error) {
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("decode config %q: %w", path, err)
 	}
+	cfg.ApplyDefaults()
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("validate config %q: %w", path, err)
 	}
 
 	return &cfg, nil
+}
+
+func (c *Config) ApplyDefaults() {
+	if c.Chain.MaxBlockRange == 0 {
+		c.Chain.MaxBlockRange = 100
+	}
 }
 
 func (c Config) Validate() error {

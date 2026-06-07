@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS indexer_checkpoints (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    chain_id BIGINT NOT NULL,
+    indexer_name VARCHAR(64) NOT NULL,
+    last_indexed_block BIGINT UNSIGNED NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_chain_indexer (chain_id, indexer_name)
+);

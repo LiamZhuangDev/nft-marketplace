@@ -19,7 +19,7 @@ var daemonCmd = &cobra.Command{
 			return err
 		}
 
-		status, err := app.CheckDependencies(cmd.Context(), cfg)
+		result, err := app.RunCheckpointBatch(cmd.Context(), cfg)
 		if err != nil {
 			return err
 		}
@@ -27,7 +27,22 @@ var daemonCmd = &cobra.Command{
 		fmt.Println("config loaded successfully")
 		fmt.Printf("mysql connected: %s:%d/%s\n", cfg.DB.Host, cfg.DB.Port, cfg.DB.Database)
 		fmt.Printf("redis connected: %s db=%d\n", cfg.Redis.Host, cfg.Redis.DB)
-		fmt.Printf("chain connected: %s chain_id=%d current_block=%d\n", cfg.Chain.Name, cfg.Chain.ID, status.CurrentBlock)
+		fmt.Printf("chain connected: %s chain_id=%d current_block=%d\n", cfg.Chain.Name, cfg.Chain.ID, result.CurrentBlock)
+		if result.Batch.NoBlocksReady {
+			fmt.Printf("no blocks ready: checkpoint=%d safe_block=%d current_block=%d\n",
+				result.Batch.FromBlock,
+				result.Batch.SafeBlock,
+				result.Batch.CurrentBlock,
+			)
+			return nil
+		}
+		fmt.Printf("fetched logs: from_block=%d to_block=%d count=%d next_checkpoint=%d safe_block=%d\n",
+			result.Batch.FromBlock,
+			result.Batch.ToBlock,
+			result.Batch.LogCount,
+			result.Batch.NextBlock,
+			result.Batch.SafeBlock,
+		)
 		return nil
 	},
 }

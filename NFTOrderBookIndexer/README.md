@@ -344,6 +344,44 @@ eth.BlockNumber(ctx)
 ```
 
 ### Milestone 4: checkpoint loop fetches logs
+Git Commit: <commit_uri>
+
+The key indexing idea: `The indexer should read the latest block and index only up to safe block.`
+```mermaid
+flowchart TD
+    A[Start SyncNextBatch] --> B[Ask RPC for current block]
+    B --> C{Enough confirmed blocks?}
+    C -- No --> D[Return skipped result]
+    C -- Yes --> E[Compute safeBlock]
+    E --> F[Read checkpoint from MySQL]
+    F --> G{checkpoint <= safeBlock?}
+    G -- No --> D
+    G -- Yes --> H[Choose toBlock using max_block_range]
+    H --> I[Fetch logs from RPC]
+    I --> J[Save next checkpoint to MySQL]
+    J --> K[Return batch result]
+```
+
+Apply DB migration to add `index_checkpoints` table if haven't done:
+```shell
+cd NFTOrderBookIndexer
+mysql -h 127.0.0.1 -P 3306 -u easyuser -peasypasswd easyswap < db/migrations/01_create.sql
+```
+
+Then run:
+```shell
+go run . daemon -c ./config/config.toml
+```
+
+Expected output shape:
+```
+config loaded successfully
+mysql connected: 127.0.0.1:3306/easyswap
+redis connected: 127.0.0.1:6379 db=0
+chain connected: sepolia chain_id=11155111 current_block=11010682
+fetched logs: from_block=0 to_block=99 count=0 next_checkpoint=100 safe_block=11010674
+```
+
 ### Milestone 5: LogMake creates DB rows
 ### Milestone 6: LogCancel updates DB rows
 ### Milestone 7: LogMatch updates DB rows
