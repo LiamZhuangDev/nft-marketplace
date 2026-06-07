@@ -20,7 +20,7 @@ db = 0
 [chain]
 name = "sepolia"
 id = 11155111
-rpc_url = "https://rpc.ankr.com/eth_sepolia"
+rpc_url = "https://sepolia.infura.io/v3/your_api_key"
 safe_block_confirmations = 8
 start_block = 0
 

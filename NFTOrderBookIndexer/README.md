@@ -249,12 +249,14 @@ If `monitor.pprof_enable = true`, pprof is exposed on `0.0.0.0:<monitor.pprof_po
 ## Rebuild Path from `EasySwapSync`
 
 ### Milestone 1: CLI + config loads
-Git commit: <commit_uri>
-Install go dependencies：
+Git commit: https://github.com/LiamZhuangDev/nft-marketplace/commit/bf65436a7f52ebe86fc2156a8f5a26f6f247d618
+
+Install cobra and viper dependencies:
 ```shell
-go get github.com/go-sql-driver/mysql
-go get github.com/redis/go-redis/v9
+go get github.com/spf13/cobra
+go get github.com/spf13/viper
 ```
+
 The execution order is roughly:
 ```text
 program starts
@@ -286,14 +288,16 @@ main.go
               -> prints config
 ```
 ### Milestone 2: DB + Redis connect
-Git commit: <commit_uri>
-Install go dependencies:
+Git commit: https://github.com/LiamZhuangDev/nft-marketplace/commit/389fdc8b91133fd5a037e2366764be847bb86e29
+
+Install mysql and redis dependencies:
 ```shell
-go get github.com/spf13/cobra
-go get github.com/spf13/viper
+go get github.com/go-sql-driver/mysql
+go get github.com/redis/go-redis/v9
 ```
 Start MySQL and Redis:
 ```shell
+$ cd NFTOrderBookIndexer
 $ docker compose up -d
 $ docker ps
 CONTAINER ID   IMAGE       COMMAND                  CREATED          STATUS          PORTS                                                    NAMES
@@ -307,6 +311,15 @@ $ docker compose down -v # deletes the local MySQL data volume.
 $ docker compose up -d
 ```
 
+If something on your host machine is already using port `3306`, most likely MySQL, stop it before run docker:
+```shell
+sudo lsof -i :3306
+COMMAND  PID  USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
+mysqld  1471 mysql   23u  IPv4   5743      0t0  TCP localhost:mysql (LISTEN)
+
+sudo systemctl stop mysql
+```
+
 Connect MySQL and Redis:
 ```shell
 $ go run . daemon -c ./config/config.toml
@@ -314,6 +327,29 @@ config loaded successfully
 mysql connected: 127.0.0.1:3306/easyswap
 redis connected: 127.0.0.1:6379 db=0
 ```
+
+### Milestone 3: current block prints
+Install `ethclient` go wrapper
+```shell
+go get github.com/ethereum/go-ethereum
+```
+
+Connect to ETH RPC and fetches the current block
+```go
+eth, err := ethclient.DialContext(ctx, cfg.RPCURL)
+if err != nil {
+   return nil, fmt.Errorf("dial rpc %q: %w", cfg.RPCURL, err)
+}
+eth.BlockNumber(ctx)
+```
+
+### Milestone 4: checkpoint loop fetches logs
+### Milestone 5: LogMake creates DB rows
+### Milestone 6: LogCancel updates DB rows
+### Milestone 7: LogMatch updates DB rows
+### Milestone 8: Redis event consumer updates floor price
+### Milestone 9: order expiry worker
+### Milestone 10: README + diagrams + tests
 
 ## Operational Notes
 
