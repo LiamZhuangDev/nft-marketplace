@@ -19,14 +19,15 @@ type Service struct {
 }
 
 type BatchResult struct {
-	FromBlock         uint64
-	ToBlock           uint64
-	NextBlock         uint64
-	CurrentBlock      uint64
-	SafeBlock         uint64
-	LogCount          int
-	OrderCreatedCount int
-	NoBlocksReady     bool // No safe block to index as one of these two reasons: current block is not far enough ahead or checkpoint is already ahead of the safe block
+	FromBlock           uint64
+	ToBlock             uint64
+	NextBlock           uint64
+	CurrentBlock        uint64
+	SafeBlock           uint64
+	LogCount            int
+	OrderCreatedCount   int
+	OrderCancelledCount int
+	NoBlocksReady       bool // No safe block to index as one of these two reasons: current block is not far enough ahead or checkpoint is already ahead of the safe block
 }
 
 func New(cfg *config.Config, db *sql.DB, chainClient *chain.Client) (*Service, error) {
@@ -80,20 +81,32 @@ func (s *Service) SyncNextBatch(ctx context.Context) (*BatchResult, error) {
 	}
 
 	orderCreatedCount := 0
+	orderCancelledCount := 0
 	for _, log := range logs {
-		if !s.events.IsOrderCreated(log) {
+		if s.events.IsOrderCreated(log) {
+			record, err := s.events.DecodeOrderCreated(log, s.cfg.Chain.ID)
+			if err != nil {
+				return nil, fmt.Errorf("decode OrderCreated tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
+			}
+
+			if err := s.orderbook.SaveOrderCreated(ctx, record.order, record.item, record.activity); err != nil {
+				return nil, fmt.Errorf("save OrderCreated tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
+			}
+			orderCreatedCount++
 			continue
 		}
 
-		record, err := s.events.DecodeOrderCreated(log, s.cfg.Chain.ID)
-		if err != nil {
-			return nil, fmt.Errorf("decode OrderCreated tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
-		}
+		if s.events.IsOrderCancelled(log) {
+			event, err := s.events.DecodeOrderCancelled(log, s.cfg.Chain.ID)
+			if err != nil {
+				return nil, fmt.Errorf("decode OrderCancelled tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
+			}
 
-		if err := s.orderbook.SaveOrderCreated(ctx, record.order, record.item, record.activity); err != nil {
-			return nil, fmt.Errorf("save OrderCreated tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
+			if err := s.orderbook.SaveOrderCancelled(ctx, *event); err != nil {
+				return nil, fmt.Errorf("save OrderCancelled tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
+			}
+			orderCancelledCount++
 		}
-		orderCreatedCount++
 	}
 
 	nextBlock := toBlock + 1
@@ -102,12 +115,13 @@ func (s *Service) SyncNextBatch(ctx context.Context) (*BatchResult, error) {
 	}
 
 	return &BatchResult{
-		FromBlock:         fromBlock,
-		ToBlock:           toBlock,
-		NextBlock:         nextBlock,
-		CurrentBlock:      currentBlock,
-		SafeBlock:         safeBlock,
-		LogCount:          len(logs),
-		OrderCreatedCount: orderCreatedCount,
+		FromBlock:           fromBlock,
+		ToBlock:             toBlock,
+		NextBlock:           nextBlock,
+		CurrentBlock:        currentBlock,
+		SafeBlock:           safeBlock,
+		LogCount:            len(logs),
+		OrderCreatedCount:   orderCreatedCount,
+		OrderCancelledCount: orderCancelledCount,
 	}, nil
 }

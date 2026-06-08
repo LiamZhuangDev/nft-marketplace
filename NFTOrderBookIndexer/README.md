@@ -383,7 +383,7 @@ config loaded successfully
 mysql connected: 127.0.0.1:3306/easyswap
 redis connected: 127.0.0.1:6379 db=0
 chain connected: sepolia chain_id=11155111 current_block=11010682
-fetched logs: from_block=0 to_block=99 count=0 next_checkpoint=100 safe_block=11010674
+fetched logs: from_block=0 to_block=99 count=0 order_created_count=0 order_cancelled_count=0 next_checkpoint=100 safe_block=11010674
 ```
 
 ### Milestone 5: OrderCreated creates DB rows
@@ -411,6 +411,21 @@ mysql -h 127.0.0.1 -P 3306 -u easyuser -peasypasswd easyswap < db/migrations/01_
 ```
 
 ### Milestone 6: OrderCancelled updates DB rows
+What changed:
+```text
+1. Added OrderCancelled ABI/topic decode logic in internal/indexer/events.go
+2. Added OrderCancelled model in internal/model/orderbook.go
+3. Added SaveOrderCancelled in internal/store/orderbook.go
+4. Updated SyncNextBatch so:
+   - detects OrderCancelled logs
+   - decodes order key and maker from indexed topics
+   - loads the existing order row
+   - marks the order cancelled
+   - clears item listing state for listing orders
+   - inserts an order_cancelled activity row
+   - advances checkpoint after successful processing
+```
+
 ### Milestone 7: OrderMatched updates DB rows
 ### Milestone 8: Redis event consumer updates floor price
 ### Milestone 9: order expiry worker

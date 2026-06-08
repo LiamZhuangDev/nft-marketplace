@@ -19,19 +19,30 @@ const (
 
 	saleKindCollection uint8 = 0
 
-	orderStatusActive = "active"
-	orderTypeListing  = "listing"
-	orderTypeItemBid  = "item_bid"
-	orderTypeCollBid  = "collection_bid"
+	orderStatusActive    = "active"
+	orderStatusCancelled = "cancelled"
+	orderTypeListing     = "listing"
+	orderTypeItemBid     = "item_bid"
+	orderTypeCollBid     = "collection_bid"
 
-	activityListing = "listing"
-	activityItemBid = "item_bid"
-	activityCollBid = "collection_bid"
+	activityListing        = "listing"
+	activityItemBid        = "item_bid"
+	activityCollBid        = "collection_bid"
+	activityOrderCancelled = "order_cancelled"
 
 	zeroAddress = "0x0000000000000000000000000000000000000000"
 )
 
 const orderbookABI = `[
+	{
+		"anonymous": false,
+		"inputs": [
+			{"indexed": true, "internalType": "OrderKey", "name": "orderKey", "type": "bytes32"},
+			{"indexed": true, "internalType": "address", "name": "maker", "type": "address"}
+		],
+		"name": "OrderCancelled",
+		"type": "event"
+	},
 	{
 		"anonymous": false,
 		"inputs": [
@@ -60,8 +71,9 @@ const orderbookABI = `[
 ]`
 
 type eventDecoder struct {
-	abi               abi.ABI
-	orderCreatedTopic common.Hash
+	abi                 abi.ABI
+	orderCreatedTopic   common.Hash
+	orderCancelledTopic common.Hash
 }
 
 type orderCreatedData struct {
@@ -89,13 +101,18 @@ func newEventDecoder() (*eventDecoder, error) {
 	}
 
 	return &eventDecoder{
-		abi:               parsed,
-		orderCreatedTopic: parsed.Events["OrderCreated"].ID,
+		abi:                 parsed,
+		orderCreatedTopic:   parsed.Events["OrderCreated"].ID,
+		orderCancelledTopic: parsed.Events["OrderCancelled"].ID,
 	}, nil
 }
 
 func (d *eventDecoder) IsOrderCreated(log types.Log) bool {
 	return len(log.Topics) > 0 && log.Topics[0] == d.orderCreatedTopic
+}
+
+func (d *eventDecoder) IsOrderCancelled(log types.Log) bool {
+	return len(log.Topics) > 0 && log.Topics[0] == d.orderCancelledTopic
 }
 
 func (d *eventDecoder) DecodeOrderCreated(log types.Log, chainID int64) (*orderCreatedRecord, error) {
@@ -166,6 +183,21 @@ func (d *eventDecoder) DecodeOrderCreated(log types.Log, chainID int64) (*orderC
 		order:    order,
 		item:     item,
 		activity: activity,
+	}, nil
+}
+
+func (d *eventDecoder) DecodeOrderCancelled(log types.Log, chainID int64) (*model.OrderCancelled, error) {
+	if len(log.Topics) < 3 {
+		return nil, fmt.Errorf("OrderCancelled has %d topics, expected at least 3", len(log.Topics))
+	}
+
+	return &model.OrderCancelled{
+		ChainID:     chainID,
+		OrderID:     log.Topics[1].Hex(),
+		Maker:       common.BytesToAddress(log.Topics[2].Bytes()).Hex(),
+		BlockNumber: log.BlockNumber,
+		TxHash:      log.TxHash.Hex(),
+		LogIndex:    log.Index,
 	}, nil
 }
 

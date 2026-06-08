@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"nft-orderbook-indexer/internal/model"
@@ -35,6 +36,51 @@ func (s *OrderbookStore) SaveOrderCreated(ctx context.Context, order model.Order
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit OrderCreated tx: %w", err)
+	}
+	return nil
+}
+
+func (s *OrderbookStore) SaveOrderCancelled(ctx context.Context, event model.OrderCancelled) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	order, err := getOrderForUpdate(ctx, tx, event.ChainID, event.OrderID)
+	if err != nil {
+		return err
+	}
+
+	if err := updateOrderCancelled(ctx, tx, event); err != nil {
+		return err
+	}
+
+	if order.OrderType == "listing" {
+		if err := clearItemListing(ctx, tx, *order); err != nil {
+			return err
+		}
+	}
+
+	activity := model.Activity{
+		ChainID:           event.ChainID,
+		ActivityType:      "order_cancelled",
+		OrderID:           event.OrderID,
+		CollectionAddress: order.CollectionAddress,
+		TokenID:           order.TokenID,
+		Maker:             event.Maker,
+		Taker:             order.Taker,
+		Price:             order.Price,
+		BlockNumber:       event.BlockNumber,
+		TxHash:            event.TxHash,
+		LogIndex:          event.LogIndex,
+	}
+	if err := insertActivity(ctx, tx, activity); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit OrderCancelled tx: %w", err)
 	}
 	return nil
 }
@@ -81,6 +127,86 @@ func insertOrder(ctx context.Context, tx *sql.Tx, order model.Order) error {
 	)
 	if err != nil {
 		return fmt.Errorf("insert order %s: %w", order.OrderID, err)
+	}
+	return nil
+}
+
+func getOrderForUpdate(ctx context.Context, tx *sql.Tx, chainID int64, orderID string) (*model.Order, error) {
+	var order model.Order
+	err := tx.QueryRowContext(
+		ctx,
+		`SELECT
+			chain_id, order_id, order_status, order_type, collection_address, token_id,
+			maker, taker, price, quantity_remaining, size, expire_time, salt,
+			block_number, tx_hash, log_index
+		FROM nft_orders
+		WHERE chain_id = ? AND order_id = ?
+		FOR UPDATE`,
+		chainID,
+		orderID,
+	).Scan(
+		&order.ChainID,
+		&order.OrderID,
+		&order.OrderStatus,
+		&order.OrderType,
+		&order.CollectionAddress,
+		&order.TokenID,
+		&order.Maker,
+		&order.Taker,
+		&order.Price,
+		&order.QuantityRemaining,
+		&order.Size,
+		&order.ExpireTime,
+		&order.Salt,
+		&order.BlockNumber,
+		&order.TxHash,
+		&order.LogIndex,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("cancelled order %s not found", orderID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query order %s for update: %w", orderID, err)
+	}
+	return &order, nil
+}
+
+func updateOrderCancelled(ctx context.Context, tx *sql.Tx, event model.OrderCancelled) error {
+	_, err := tx.ExecContext(
+		ctx,
+		`UPDATE nft_orders
+		 SET order_status = ?,
+		     quantity_remaining = 0,
+		     block_number = ?,
+		     tx_hash = ?,
+		     log_index = ?
+		 WHERE chain_id = ? AND order_id = ?`,
+		"cancelled",
+		event.BlockNumber,
+		event.TxHash,
+		event.LogIndex,
+		event.ChainID,
+		event.OrderID,
+	)
+	if err != nil {
+		return fmt.Errorf("update order %s cancelled: %w", event.OrderID, err)
+	}
+	return nil
+}
+
+func clearItemListing(ctx context.Context, tx *sql.Tx, order model.Order) error {
+	_, err := tx.ExecContext(
+		ctx,
+		`UPDATE nft_items
+		 SET list_price = NULL,
+		     list_time = NULL
+		 WHERE chain_id = ? AND collection_address = ? AND token_id = ?`,
+		order.ChainID,
+		order.CollectionAddress,
+		order.TokenID,
+	)
+	if err != nil {
+		return fmt.Errorf("clear item listing %s/%s: %w", order.CollectionAddress, order.TokenID, err)
 	}
 	return nil
 }

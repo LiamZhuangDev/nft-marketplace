@@ -42,3 +42,12 @@ type Activity struct {
 	TxHash            string
 	LogIndex          uint
 }
+
+type OrderCancelled struct {
+	ChainID     int64
+	OrderID     string
+	Maker       string
+	BlockNumber uint64
+	TxHash      string
+	LogIndex    uint
+}
