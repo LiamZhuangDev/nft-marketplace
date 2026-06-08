@@ -29,11 +29,70 @@ const (
 	activityItemBid        = "item_bid"
 	activityCollBid        = "collection_bid"
 	activityOrderCancelled = "order_cancelled"
+	activityOrderMatched   = "order_matched"
 
 	zeroAddress = "0x0000000000000000000000000000000000000000"
 )
 
 const orderbookABI = `[
+	{
+		"anonymous": false,
+		"inputs": [
+			{"indexed": true, "internalType": "OrderKey", "name": "listingOrderKey", "type": "bytes32"},
+			{"indexed": true, "internalType": "OrderKey", "name": "offerOrderKey", "type": "bytes32"},
+			{
+				"components": [
+					{"internalType": "uint8", "name": "side", "type": "uint8"},
+					{"internalType": "uint8", "name": "saleKind", "type": "uint8"},
+					{"internalType": "address", "name": "maker", "type": "address"},
+					{
+						"components": [
+							{"internalType": "uint256", "name": "tokenId", "type": "uint256"},
+							{"internalType": "address", "name": "collection", "type": "address"},
+							{"internalType": "uint96", "name": "amount", "type": "uint96"}
+						],
+						"internalType": "struct Asset",
+						"name": "nft",
+						"type": "tuple"
+					},
+					{"internalType": "uint128", "name": "price", "type": "uint128"},
+					{"internalType": "uint64", "name": "expiry", "type": "uint64"},
+					{"internalType": "uint64", "name": "salt", "type": "uint64"}
+				],
+				"indexed": false,
+				"internalType": "struct Order",
+				"name": "listing",
+				"type": "tuple"
+			},
+			{
+				"components": [
+					{"internalType": "uint8", "name": "side", "type": "uint8"},
+					{"internalType": "uint8", "name": "saleKind", "type": "uint8"},
+					{"internalType": "address", "name": "maker", "type": "address"},
+					{
+						"components": [
+							{"internalType": "uint256", "name": "tokenId", "type": "uint256"},
+							{"internalType": "address", "name": "collection", "type": "address"},
+							{"internalType": "uint96", "name": "amount", "type": "uint96"}
+						],
+						"internalType": "struct Asset",
+						"name": "nft",
+						"type": "tuple"
+					},
+					{"internalType": "uint128", "name": "price", "type": "uint128"},
+					{"internalType": "uint64", "name": "expiry", "type": "uint64"},
+					{"internalType": "uint64", "name": "salt", "type": "uint64"}
+				],
+				"indexed": false,
+				"internalType": "struct Order",
+				"name": "offer",
+				"type": "tuple"
+			},
+			{"indexed": false, "internalType": "uint128", "name": "fillPrice", "type": "uint128"}
+		],
+		"name": "OrderMatched",
+		"type": "event"
+	},
 	{
 		"anonymous": false,
 		"inputs": [
@@ -74,6 +133,7 @@ type eventDecoder struct {
 	abi                 abi.ABI
 	orderCreatedTopic   common.Hash
 	orderCancelledTopic common.Hash
+	orderMatchedTopic   common.Hash
 }
 
 type orderCreatedData struct {
@@ -94,6 +154,28 @@ type orderCreatedRecord struct {
 	activity model.Activity
 }
 
+type orderMatchedData struct {
+	Listing   abiOrder `abi:"listing"`
+	Offer     abiOrder `abi:"offer"`
+	FillPrice *big.Int `abi:"fillPrice"`
+}
+
+type abiOrder struct {
+	Side     uint8
+	SaleKind uint8
+	Maker    common.Address
+	Nft      abiAsset
+	Price    *big.Int
+	Expiry   uint64
+	Salt     uint64
+}
+
+type abiAsset struct {
+	TokenID    *big.Int       `abi:"tokenId"`
+	Collection common.Address `abi:"collection"`
+	Amount     *big.Int       `abi:"amount"`
+}
+
 func newEventDecoder() (*eventDecoder, error) {
 	parsed, err := abi.JSON(strings.NewReader(orderbookABI))
 	if err != nil {
@@ -104,6 +186,7 @@ func newEventDecoder() (*eventDecoder, error) {
 		abi:                 parsed,
 		orderCreatedTopic:   parsed.Events["OrderCreated"].ID,
 		orderCancelledTopic: parsed.Events["OrderCancelled"].ID,
+		orderMatchedTopic:   parsed.Events["OrderMatched"].ID,
 	}, nil
 }
 
@@ -113,6 +196,10 @@ func (d *eventDecoder) IsOrderCreated(log types.Log) bool {
 
 func (d *eventDecoder) IsOrderCancelled(log types.Log) bool {
 	return len(log.Topics) > 0 && log.Topics[0] == d.orderCancelledTopic
+}
+
+func (d *eventDecoder) IsOrderMatched(log types.Log) bool {
+	return len(log.Topics) > 0 && log.Topics[0] == d.orderMatchedTopic
 }
 
 func (d *eventDecoder) DecodeOrderCreated(log types.Log, chainID int64) (*orderCreatedRecord, error) {
@@ -199,6 +286,43 @@ func (d *eventDecoder) DecodeOrderCancelled(log types.Log, chainID int64) (*mode
 		TxHash:      log.TxHash.Hex(),
 		LogIndex:    log.Index,
 	}, nil
+}
+
+func (d *eventDecoder) DecodeOrderMatched(log types.Log, chainID int64) (*model.OrderMatched, error) {
+	if len(log.Topics) < 3 {
+		return nil, fmt.Errorf("OrderMatched has %d topics, expected at least 3", len(log.Topics))
+	}
+
+	var data orderMatchedData
+	if err := d.abi.UnpackIntoInterface(&data, "OrderMatched", log.Data); err != nil {
+		return nil, fmt.Errorf("unpack OrderMatched data: %w", err)
+	}
+
+	return &model.OrderMatched{
+		ChainID:        chainID,
+		ListingOrderID: log.Topics[1].Hex(),
+		OfferOrderID:   log.Topics[2].Hex(),
+		Listing:        toMatchedOrderSnapshot(data.Listing),
+		Offer:          toMatchedOrderSnapshot(data.Offer),
+		FillPrice:      data.FillPrice.String(),
+		BlockNumber:    log.BlockNumber,
+		TxHash:         log.TxHash.Hex(),
+		LogIndex:       log.Index,
+	}, nil
+}
+
+func toMatchedOrderSnapshot(order abiOrder) model.MatchedOrderSnapshot {
+	return model.MatchedOrderSnapshot{
+		Side:              order.Side,
+		SaleKind:          order.SaleKind,
+		Maker:             order.Maker.Hex(),
+		CollectionAddress: order.Nft.Collection.Hex(),
+		TokenID:           order.Nft.TokenID.String(),
+		Amount:            order.Nft.Amount.Uint64(),
+		Price:             order.Price.String(),
+		ExpireTime:        order.Expiry,
+		Salt:              order.Salt,
+	}
 }
 
 func classifyMake(side, saleKind uint8) (orderType string, activityType string) {

@@ -383,7 +383,7 @@ config loaded successfully
 mysql connected: 127.0.0.1:3306/easyswap
 redis connected: 127.0.0.1:6379 db=0
 chain connected: sepolia chain_id=11155111 current_block=11010682
-fetched logs: from_block=0 to_block=99 count=0 order_created_count=0 order_cancelled_count=0 next_checkpoint=100 safe_block=11010674
+fetched logs: from_block=0 to_block=99 count=0 order_created_count=0 order_cancelled_count=0 order_matched_count=0 next_checkpoint=100 safe_block=11010674
 ```
 
 ### Milestone 5: OrderCreated creates DB rows
@@ -427,6 +427,22 @@ What changed:
 ```
 
 ### Milestone 7: OrderMatched updates DB rows
+What changed:
+```text
+1. Added OrderMatched ABI/topic decode logic in internal/indexer/events.go
+2. Added OrderMatched and MatchedOrderSnapshot models in internal/model/orderbook.go
+3. Added SaveOrderMatched in internal/store/orderbook.go
+4. Updated SyncNextBatch so:
+   - detects OrderMatched logs
+   - decodes listing order, offer order, and fill price
+   - marks the listing order filled
+   - reduces the offer order quantity if it exists locally
+   - moves item ownership to the buyer
+   - clears item listing state
+   - inserts an order_matched activity row
+   - advances checkpoint after successful processing
+```
+
 ### Milestone 8: Redis event consumer updates floor price
 ### Milestone 9: order expiry worker
 ### Milestone 10: README + diagrams + tests

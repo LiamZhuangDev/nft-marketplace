@@ -51,3 +51,27 @@ type OrderCancelled struct {
 	TxHash      string
 	LogIndex    uint
 }
+
+type MatchedOrderSnapshot struct {
+	Side              uint8
+	SaleKind          uint8
+	Maker             string
+	CollectionAddress string
+	TokenID           string
+	Amount            uint64
+	Price             string
+	ExpireTime        uint64
+	Salt              uint64
+}
+
+type OrderMatched struct {
+	ChainID        int64
+	ListingOrderID string
+	OfferOrderID   string
+	Listing        MatchedOrderSnapshot
+	Offer          MatchedOrderSnapshot
+	FillPrice      string
+	BlockNumber    uint64
+	TxHash         string
+	LogIndex       uint
+}

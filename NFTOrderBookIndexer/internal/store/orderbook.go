@@ -85,6 +85,46 @@ func (s *OrderbookStore) SaveOrderCancelled(ctx context.Context, event model.Ord
 	return nil
 }
 
+func (s *OrderbookStore) SaveOrderMatched(ctx context.Context, event model.OrderMatched) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := fillListingOrder(ctx, tx, event); err != nil {
+		return err
+	}
+	if err := reduceOfferOrderIfExists(ctx, tx, event); err != nil {
+		return err
+	}
+	if err := upsertItemOnMatch(ctx, tx, event); err != nil {
+		return err
+	}
+
+	activity := model.Activity{
+		ChainID:           event.ChainID,
+		ActivityType:      "order_matched",
+		OrderID:           event.ListingOrderID,
+		CollectionAddress: event.Listing.CollectionAddress,
+		TokenID:           event.Listing.TokenID,
+		Maker:             event.Listing.Maker,
+		Taker:             event.Offer.Maker,
+		Price:             event.FillPrice,
+		BlockNumber:       event.BlockNumber,
+		TxHash:            event.TxHash,
+		LogIndex:          event.LogIndex,
+	}
+	if err := insertActivity(ctx, tx, activity); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit OrderMatched tx: %w", err)
+	}
+	return nil
+}
+
 func insertOrder(ctx context.Context, tx *sql.Tx, order model.Order) error {
 	_, err := tx.ExecContext(
 		ctx,
@@ -127,6 +167,86 @@ func insertOrder(ctx context.Context, tx *sql.Tx, order model.Order) error {
 	)
 	if err != nil {
 		return fmt.Errorf("insert order %s: %w", order.OrderID, err)
+	}
+	return nil
+}
+
+func fillListingOrder(ctx context.Context, tx *sql.Tx, event model.OrderMatched) error {
+	_, err := tx.ExecContext(
+		ctx,
+		`UPDATE nft_orders
+		 SET order_status = ?,
+		     quantity_remaining = 0,
+		     taker = ?,
+		     block_number = ?,
+		     tx_hash = ?,
+		     log_index = ?
+		 WHERE chain_id = ? AND order_id = ?`,
+		"filled",
+		event.Offer.Maker,
+		event.BlockNumber,
+		event.TxHash,
+		event.LogIndex,
+		event.ChainID,
+		event.ListingOrderID,
+	)
+	if err != nil {
+		return fmt.Errorf("fill listing order %s: %w", event.ListingOrderID, err)
+	}
+	return nil
+}
+
+func reduceOfferOrderIfExists(ctx context.Context, tx *sql.Tx, event model.OrderMatched) error {
+	_, err := tx.ExecContext(
+		ctx,
+		`UPDATE nft_orders
+		 SET quantity_remaining = CASE
+		       WHEN quantity_remaining <= ? THEN 0
+		       ELSE quantity_remaining - ?
+		     END,
+		     order_status = CASE
+		       WHEN quantity_remaining <= ? THEN ?
+		       ELSE order_status
+		     END,
+		     block_number = ?,
+		     tx_hash = ?,
+		     log_index = ?
+		 WHERE chain_id = ? AND order_id = ?`,
+		event.Listing.Amount,
+		event.Listing.Amount,
+		event.Listing.Amount,
+		"filled",
+		event.BlockNumber,
+		event.TxHash,
+		event.LogIndex,
+		event.ChainID,
+		event.OfferOrderID,
+	)
+	if err != nil {
+		return fmt.Errorf("reduce offer order %s: %w", event.OfferOrderID, err)
+	}
+	return nil
+}
+
+func upsertItemOnMatch(ctx context.Context, tx *sql.Tx, event model.OrderMatched) error {
+	_, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO nft_items (
+			chain_id, collection_address, token_id, owner, supply, list_price, list_time
+		) VALUES (?, ?, ?, ?, ?, NULL, NULL)
+		ON DUPLICATE KEY UPDATE
+			owner = VALUES(owner),
+			supply = VALUES(supply),
+			list_price = NULL,
+			list_time = NULL`,
+		event.ChainID,
+		event.Listing.CollectionAddress,
+		event.Listing.TokenID,
+		event.Offer.Maker,
+		event.Listing.Amount,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert item on match %s/%s: %w", event.Listing.CollectionAddress, event.Listing.TokenID, err)
 	}
 	return nil
 }

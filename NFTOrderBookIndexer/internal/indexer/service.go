@@ -27,6 +27,7 @@ type BatchResult struct {
 	LogCount            int
 	OrderCreatedCount   int
 	OrderCancelledCount int
+	OrderMatchedCount   int
 	NoBlocksReady       bool // No safe block to index as one of these two reasons: current block is not far enough ahead or checkpoint is already ahead of the safe block
 }
 
@@ -82,6 +83,7 @@ func (s *Service) SyncNextBatch(ctx context.Context) (*BatchResult, error) {
 
 	orderCreatedCount := 0
 	orderCancelledCount := 0
+	orderMatchedCount := 0
 	for _, log := range logs {
 		if s.events.IsOrderCreated(log) {
 			record, err := s.events.DecodeOrderCreated(log, s.cfg.Chain.ID)
@@ -106,6 +108,19 @@ func (s *Service) SyncNextBatch(ctx context.Context) (*BatchResult, error) {
 				return nil, fmt.Errorf("save OrderCancelled tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
 			}
 			orderCancelledCount++
+			continue
+		}
+
+		if s.events.IsOrderMatched(log) {
+			event, err := s.events.DecodeOrderMatched(log, s.cfg.Chain.ID)
+			if err != nil {
+				return nil, fmt.Errorf("decode OrderMatched tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
+			}
+
+			if err := s.orderbook.SaveOrderMatched(ctx, *event); err != nil {
+				return nil, fmt.Errorf("save OrderMatched tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
+			}
+			orderMatchedCount++
 		}
 	}
 
@@ -123,5 +138,6 @@ func (s *Service) SyncNextBatch(ctx context.Context) (*BatchResult, error) {
 		LogCount:            len(logs),
 		OrderCreatedCount:   orderCreatedCount,
 		OrderCancelledCount: orderCancelledCount,
+		OrderMatchedCount:   orderMatchedCount,
 	}, nil
 }
