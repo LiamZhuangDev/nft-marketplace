@@ -89,7 +89,10 @@ func RunCheckpointBatch(ctx context.Context, cfg *config.Config) (*RunResult, er
 		return nil, fmt.Errorf("get current block: %w", err)
 	}
 
-	idx := indexer.New(cfg, db, chainClient)
+	idx, err := indexer.New(cfg, db, chainClient)
+	if err != nil {
+		return nil, fmt.Errorf("create indexer: %w", err)
+	}
 	batch, err := idx.SyncNextBatch(ctx)
 	if err != nil {
 		return nil, err

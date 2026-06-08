@@ -36,10 +36,11 @@ var daemonCmd = &cobra.Command{
 			)
 			return nil
 		}
-		fmt.Printf("fetched logs: from_block=%d to_block=%d count=%d next_checkpoint=%d safe_block=%d\n",
+		fmt.Printf("fetched logs: from_block=%d to_block=%d count=%d order_created_count=%d next_checkpoint=%d safe_block=%d\n",
 			result.Batch.FromBlock,
 			result.Batch.ToBlock,
 			result.Batch.LogCount,
+			result.Batch.OrderCreatedCount,
 			result.Batch.NextBlock,
 			result.Batch.SafeBlock,
 		)

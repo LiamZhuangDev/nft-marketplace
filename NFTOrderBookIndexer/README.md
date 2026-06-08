@@ -8,9 +8,9 @@ The service polls blockchain logs from the configured order book contract, decod
 
 The main indexer listens for these on-chain events:
 
-- `LogMake`: creates listing, collection bid, or item bid records.
-- `LogMatch`: marks matched orders filled, records a sale, and updates item ownership/listing state.
-- `LogCancel`: marks orders cancelled and clears listing state when applicable.
+- `OrderCreated`: creates listing, collection bid, or item bid records.
+- `OrderMatched`: marks matched orders filled, records a sale, and updates item ownership/listing state.
+- `OrderCancelled`: marks orders cancelled and clears listing state when applicable.
 - `Approval`: records ERC721 approval activity and checks whether the vault is approved.
 
 The service also maintains collection floor price history and delegates order expiry/list-count work to `EasySwapBase/ordermanager`.
@@ -40,7 +40,7 @@ Runtime dependencies:
 
 ```text
                  EasySwap DEX Contract
-               LogMake / LogMatch / LogCancel
+          OrderCreated / OrderMatched / OrderCancelled
                            |
                            | RPC FilterLogs()
                            v
@@ -50,8 +50,8 @@ Runtime dependencies:
           +----------------+----------------+
           |                |                |
           v                v                v
-      LogMake          LogMatch          LogCancel
-   handleMakeEvent  handleMatchEvent  handleCancelEvent
+  OrderCreated    OrderMatched    OrderCancelled
+   create order    match order      cancel order
           |                |                |
           |                |                |
           v                v                v
@@ -344,7 +344,7 @@ eth.BlockNumber(ctx)
 ```
 
 ### Milestone 4: checkpoint loop fetches logs
-Git Commit: <commit_uri>
+Git Commit: https://github.com/LiamZhuangDev/nft-marketplace/commit/88aadd79f36e0a0f4532a1bf0d07f8354d140e63
 
 The key indexing idea: `The indexer should read the latest block and index only up to safe block.`
 ```mermaid
@@ -360,6 +360,10 @@ flowchart TD
     H --> I[Fetch logs from RPC]
     I --> J[Save next checkpoint to MySQL]
     J --> K[Return batch result]
+```
+
+```go
+logs, err := s.chain.FilterLogs(ctx, fromBlock, toBlock, s.cfg.Contract.OrderbookAddress)
 ```
 
 Apply DB migration to add `index_checkpoints` table if haven't done:
@@ -382,9 +386,32 @@ chain connected: sepolia chain_id=11155111 current_block=11010682
 fetched logs: from_block=0 to_block=99 count=0 next_checkpoint=100 safe_block=11010674
 ```
 
-### Milestone 5: LogMake creates DB rows
-### Milestone 6: LogCancel updates DB rows
-### Milestone 7: LogMatch updates DB rows
+### Milestone 5: OrderCreated creates DB rows
+Git Commit: <commit_uri>
+What changed:
+```text
+1. Added tables in 01_create.sql:
+   - nft_orders
+   - nft_items
+   - nft_activities
+2. Added DB models in internal/model/orderbook.go
+3. Added DB write logic in internal/store/orderbook.go
+4. Added OrderCreated ABI/topic decode logic in internal/indexer/events.go
+5. Updated SyncNextBatch so:
+   - fetch logs
+   - skips non-OrderCreated logs
+   - decodes OrderCreated
+   - inserts order/item/activity rows
+   - advances checkpoint after successful processing
+```
+
+Apply migration before indexing to create required tables:
+```shell
+mysql -h 127.0.0.1 -P 3306 -u easyuser -peasypasswd easyswap < db/migrations/01_create.sql
+```
+
+### Milestone 6: OrderCancelled updates DB rows
+### Milestone 7: OrderMatched updates DB rows
 ### Milestone 8: Redis event consumer updates floor price
 ### Milestone 9: order expiry worker
 ### Milestone 10: README + diagrams + tests

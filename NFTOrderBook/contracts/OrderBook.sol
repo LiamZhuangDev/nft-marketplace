@@ -5,11 +5,12 @@ import {OrderKey, OrderTypes} from "./libraries/OrderTypes.sol";
 import {OrderValidator} from "./libraries/OrderValidator.sol";
 import {OrderHashing} from "./libraries/OrderHashing.sol";
 import {INFTEscrowVault} from "./interfaces/INFTEscrowVault.sol";
+import {IOrderBook} from "./interfaces/IOrderBook.sol";
 import {OrderStorage} from "./OrderStorage.sol";
 import {OrderState} from "./OrderState.sol";
 import {ProtocolFeeManager} from "./ProtocolFeeManager.sol";
 
-contract OrderBook is OrderStorage, OrderState, ProtocolFeeManager {
+contract OrderBook is IOrderBook, OrderStorage, OrderState, ProtocolFeeManager {
     address public nftEscrowVault;
     address public protocolFeeRecipient;
     
@@ -49,7 +50,18 @@ contract OrderBook is OrderStorage, OrderState, ProtocolFeeManager {
         }
 
         // save order to storage
-        _addOrder(order);
+        OrderKey orderKey = _addOrder(order);
+
+        emit OrderCreated(
+            orderKey,
+            order.side,
+            order.saleKind,
+            order.maker,
+            order.nft,
+            order.price,
+            order.expiry,
+            order.salt
+        );
     }
 
     function matchOrder(OrderTypes.Order calldata listing, OrderTypes.Order calldata offer) external payable {
@@ -74,8 +86,10 @@ contract OrderBook is OrderStorage, OrderState, ProtocolFeeManager {
 
         if (msg.sender == offer.maker) {
             _buyerAcceptsListing(listing, offer, listingKey, listingExists && !listingCancelled, offerExists);
+            emit OrderMatched(listingKey, offerKey, listing, offer, listing.price);
         } else if (msg.sender == listing.maker) {
             _sellerAcceptsOffer(listing, offer, listingKey, offerKey, listingExists && !listingCancelled, offerExists && !offerCancelled);
+            emit OrderMatched(listingKey, offerKey, listing, offer, offer.price);
         } else {
             revert("sender must be listing maker or offer maker");
         }
@@ -182,6 +196,9 @@ contract OrderBook is OrderStorage, OrderState, ProtocolFeeManager {
         _cancelOrder(orderKey);
         // remove order from storage
         _removeOrder(order);
+
+        emit OrderCancelled(orderKey, order.maker);
+
         // move asset back to maker
         if (order.side == OrderTypes.Side.List) {
             INFTEscrowVault(nftEscrowVault).withdrawNFT(
