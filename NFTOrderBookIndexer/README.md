@@ -249,7 +249,7 @@ If `monitor.pprof_enable = true`, pprof is exposed on `0.0.0.0:<monitor.pprof_po
 ## Rebuild Path from `EasySwapSync`
 
 ### Milestone 1: CLI + config loads
-Git commit: https://github.com/LiamZhuangDev/nft-marketplace/commit/bf65436a7f52ebe86fc2156a8f5a26f6f247d618
+[Git commit](https://github.com/LiamZhuangDev/nft-marketplace/commit/bf65436a7f52ebe86fc2156a8f5a26f6f247d618)
 
 Install cobra and viper dependencies:
 ```shell
@@ -288,7 +288,7 @@ main.go
               -> prints config
 ```
 ### Milestone 2: DB + Redis connect
-Git commit: https://github.com/LiamZhuangDev/nft-marketplace/commit/389fdc8b91133fd5a037e2366764be847bb86e29
+[Git commit](https://github.com/LiamZhuangDev/nft-marketplace/commit/389fdc8b91133fd5a037e2366764be847bb86e29)
 
 Install mysql and redis dependencies:
 ```shell
@@ -344,7 +344,7 @@ eth.BlockNumber(ctx)
 ```
 
 ### Milestone 4: checkpoint loop fetches logs
-Git Commit: https://github.com/LiamZhuangDev/nft-marketplace/commit/88aadd79f36e0a0f4532a1bf0d07f8354d140e63
+[Git Commit](https://github.com/LiamZhuangDev/nft-marketplace/commit/88aadd79f36e0a0f4532a1bf0d07f8354d140e63)
 
 The key indexing idea: `The indexer should read the latest block and index only up to safe block.`
 ```mermaid
@@ -387,7 +387,7 @@ fetched logs: from_block=0 to_block=99 count=0 next_checkpoint=100 safe_block=11
 ```
 
 ### Milestone 5: OrderCreated creates DB rows
-Git Commit: <commit_uri>
+[Git Commit](https://github.com/LiamZhuangDev/nft-marketplace/commit/e0494586b17003e43a373d0e0fa245b46a726922)
 What changed:
 ```text
 1. Added tables in 01_create.sql:
@@ -415,6 +415,8 @@ mysql -h 127.0.0.1 -P 3306 -u easyuser -peasypasswd easyswap < db/migrations/01_
 ### Milestone 8: Redis event consumer updates floor price
 ### Milestone 9: order expiry worker
 ### Milestone 10: README + diagrams + tests
+
+---
 
 ## Operational Notes
 

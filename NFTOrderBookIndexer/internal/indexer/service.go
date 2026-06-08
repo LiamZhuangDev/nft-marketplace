@@ -13,7 +13,7 @@ import (
 type Service struct {
 	cfg        *config.Config
 	chain      *chain.Client
-	checkpoint *CheckpointStore
+	checkpoint *store.CheckpointStore
 	orderbook  *store.OrderbookStore
 	events     *eventDecoder
 }
@@ -38,7 +38,7 @@ func New(cfg *config.Config, db *sql.DB, chainClient *chain.Client) (*Service, e
 	return &Service{
 		cfg:        cfg,
 		chain:      chainClient,
-		checkpoint: NewCheckpointStore(db),
+		checkpoint: store.NewCheckpointStore(db),
 		orderbook:  store.NewOrderbookStore(db),
 		events:     events,
 	}, nil
