@@ -32,6 +32,7 @@ type Activity struct {
 	ChainID           int64
 	OrderType         string
 	OrderID           string
+	CounterOrderID    string
 	CollectionAddress string
 	TokenID           string
 	Maker             string

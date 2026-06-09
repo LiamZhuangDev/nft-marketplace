@@ -37,6 +37,7 @@ func (s *OrderbookStore) SaveOrderCreated(ctx context.Context, order model.Order
 		ChainID:           order.ChainID,
 		OrderType:         order.OrderType,
 		OrderID:           order.OrderID,
+		CounterOrderID:    "",
 		CollectionAddress: order.CollectionAddress,
 		TokenID:           order.TokenID,
 		Maker:             order.Maker,
@@ -83,6 +84,7 @@ func (s *OrderbookStore) SaveOrderCancelled(ctx context.Context, event model.Ord
 		ChainID:           event.ChainID,
 		OrderType:         "order_cancelled",
 		OrderID:           event.OrderID,
+		CounterOrderID:    "",
 		CollectionAddress: order.CollectionAddress,
 		TokenID:           order.TokenID,
 		Maker:             event.Maker,
@@ -119,14 +121,21 @@ func (s *OrderbookStore) SaveOrderMatched(ctx context.Context, event model.Order
 		return err
 	}
 
+	// If seller accepts an offer, then the maker is the buyer and the taker is the seller
 	maker := event.Offer.Maker
+	orderID := event.OfferOrderID
+	counterOrderID := event.ListingOrderID
+	// If buyer accepts a listing, then the maker is the seller and the taker is the buyer
 	if event.Taker == event.Offer.Maker {
 		maker = event.Listing.Maker
+		orderID = event.ListingOrderID
+		counterOrderID = event.OfferOrderID
 	}
 	activity := model.Activity{
 		ChainID:           event.ChainID,
 		OrderType:         "order_matched",
-		OrderID:           event.ListingOrderID,
+		OrderID:           orderID,
+		CounterOrderID:    counterOrderID,
 		CollectionAddress: event.Listing.CollectionAddress,
 		TokenID:           event.Listing.TokenID,
 		Maker:             maker,
@@ -376,11 +385,12 @@ func insertActivity(ctx context.Context, tx *sql.Tx, activity model.Activity) er
 	_, err := tx.ExecContext(
 		ctx,
 		`INSERT INTO nft_activities (
-			chain_id, activity_type, order_id, collection_address, token_id,
+			chain_id, activity_type, order_id, counter_order_id, collection_address, token_id,
 			maker, taker, price, block_number, tx_hash, log_index
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
 			order_id = VALUES(order_id),
+			counter_order_id = VALUES(counter_order_id),
 			collection_address = VALUES(collection_address),
 			token_id = VALUES(token_id),
 			maker = VALUES(maker),
@@ -390,6 +400,7 @@ func insertActivity(ctx context.Context, tx *sql.Tx, activity model.Activity) er
 		activity.ChainID,
 		activity.OrderType,
 		activity.OrderID,
+		activity.CounterOrderID,
 		activity.CollectionAddress,
 		activity.TokenID,
 		activity.Maker,

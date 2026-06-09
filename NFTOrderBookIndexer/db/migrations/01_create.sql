@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS nft_activities (
     chain_id BIGINT NOT NULL,
     activity_type VARCHAR(32) NOT NULL,
     order_id VARCHAR(66) NOT NULL,
+    counter_order_id VARCHAR(66) NOT NULL DEFAULT '',
     collection_address VARCHAR(42) NOT NULL,
     token_id VARCHAR(128) NOT NULL,
     maker VARCHAR(42) NOT NULL,
@@ -63,5 +64,6 @@ CREATE TABLE IF NOT EXISTS nft_activities (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uniq_activity_log (tx_hash, log_index, activity_type),
     KEY idx_collection_token (chain_id, collection_address, token_id),
-    KEY idx_order_id (order_id)
+    KEY idx_order_id (order_id),
+    KEY idx_counter_order_id (counter_order_id)
 );
