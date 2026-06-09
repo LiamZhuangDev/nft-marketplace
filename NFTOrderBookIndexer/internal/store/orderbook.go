@@ -13,6 +13,8 @@ type OrderbookStore struct {
 	db *sql.DB
 }
 
+const zeroAddress = "0x0000000000000000000000000000000000000000"
+
 func NewOrderbookStore(db *sql.DB) *OrderbookStore {
 	return &OrderbookStore{db: db}
 }
@@ -69,7 +71,7 @@ func (s *OrderbookStore) SaveOrderCancelled(ctx context.Context, event model.Ord
 		CollectionAddress: order.CollectionAddress,
 		TokenID:           order.TokenID,
 		Maker:             event.Maker,
-		Taker:             order.Taker,
+		Taker:             zeroAddress,
 		Price:             order.Price,
 		BlockNumber:       event.BlockNumber,
 		TxHash:            event.TxHash,
@@ -102,14 +104,18 @@ func (s *OrderbookStore) SaveOrderMatched(ctx context.Context, event model.Order
 		return err
 	}
 
+	maker := event.Offer.Maker
+	if event.Taker == event.Offer.Maker {
+		maker = event.Listing.Maker
+	}
 	activity := model.Activity{
 		ChainID:           event.ChainID,
 		ActivityType:      "order_matched",
 		OrderID:           event.ListingOrderID,
 		CollectionAddress: event.Listing.CollectionAddress,
 		TokenID:           event.Listing.TokenID,
-		Maker:             event.Listing.Maker,
-		Taker:             event.Offer.Maker,
+		Maker:             maker,
+		Taker:             event.Taker,
 		Price:             event.FillPrice,
 		BlockNumber:       event.BlockNumber,
 		TxHash:            event.TxHash,
@@ -130,16 +136,15 @@ func insertOrder(ctx context.Context, tx *sql.Tx, order model.Order) error {
 		ctx,
 		`INSERT INTO nft_orders (
 			chain_id, order_id, order_status, order_type, collection_address, token_id,
-			maker, taker, price, quantity_remaining, size, expire_time, salt,
+			maker, price, quantity_remaining, size, expire_time, salt,
 			block_number, tx_hash, log_index
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
 			order_status = VALUES(order_status),
 			order_type = VALUES(order_type),
 			collection_address = VALUES(collection_address),
 			token_id = VALUES(token_id),
 			maker = VALUES(maker),
-			taker = VALUES(taker),
 			price = VALUES(price),
 			quantity_remaining = VALUES(quantity_remaining),
 			size = VALUES(size),
@@ -155,7 +160,6 @@ func insertOrder(ctx context.Context, tx *sql.Tx, order model.Order) error {
 		order.CollectionAddress,
 		order.TokenID,
 		order.Maker,
-		order.Taker,
 		order.Price,
 		order.QuantityRemaining,
 		order.Size,
@@ -177,13 +181,11 @@ func fillListingOrder(ctx context.Context, tx *sql.Tx, event model.OrderMatched)
 		`UPDATE nft_orders
 		 SET order_status = ?,
 		     quantity_remaining = 0,
-		     taker = ?,
 		     block_number = ?,
 		     tx_hash = ?,
 		     log_index = ?
 		 WHERE chain_id = ? AND order_id = ?`,
 		"filled",
-		event.Offer.Maker,
 		event.BlockNumber,
 		event.TxHash,
 		event.LogIndex,
@@ -257,7 +259,7 @@ func getOrderForUpdate(ctx context.Context, tx *sql.Tx, chainID int64, orderID s
 		ctx,
 		`SELECT
 			chain_id, order_id, order_status, order_type, collection_address, token_id,
-			maker, taker, price, quantity_remaining, size, expire_time, salt,
+			maker, price, quantity_remaining, size, expire_time, salt,
 			block_number, tx_hash, log_index
 		FROM nft_orders
 		WHERE chain_id = ? AND order_id = ?
@@ -272,7 +274,6 @@ func getOrderForUpdate(ctx context.Context, tx *sql.Tx, chainID int64, orderID s
 		&order.CollectionAddress,
 		&order.TokenID,
 		&order.Maker,
-		&order.Taker,
 		&order.Price,
 		&order.QuantityRemaining,
 		&order.Size,

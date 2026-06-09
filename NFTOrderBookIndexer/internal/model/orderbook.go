@@ -8,7 +8,6 @@ type Order struct {
 	CollectionAddress string
 	TokenID           string
 	Maker             string
-	Taker             string
 	Price             string
 	QuantityRemaining uint64
 	Size              uint64
@@ -68,6 +67,7 @@ type OrderMatched struct {
 	ChainID        int64
 	ListingOrderID string
 	OfferOrderID   string
+	Taker          string
 	Listing        MatchedOrderSnapshot
 	Offer          MatchedOrderSnapshot
 	FillPrice      string

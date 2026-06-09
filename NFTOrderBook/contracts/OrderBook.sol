@@ -22,6 +22,8 @@ contract OrderBook is IOrderBook, OrderStorage, OrderState, ProtocolFeeManager {
     }
 
     function createOrder(OrderTypes.Order memory order) external payable {
+        require(msg.sender == order.maker, "only maker can create");
+        
         // validate ord_validateOrder
         OrderValidator._validateOrder(order, false);
 
@@ -83,16 +85,18 @@ contract OrderBook is IOrderBook, OrderStorage, OrderState, ProtocolFeeManager {
         bool offerExists = orders[offerKey].maker != address(0);
         bool listingCancelled = _isCancelled(listingKey);
         bool offerCancelled = _isCancelled(offerKey);
+        uint128 fillPrice = listing.price;
 
         if (msg.sender == offer.maker) {
             _buyerAcceptsListing(listing, offer, listingKey, listingExists && !listingCancelled, offerExists);
-            emit OrderMatched(listingKey, offerKey, listing, offer, listing.price);
         } else if (msg.sender == listing.maker) {
             _sellerAcceptsOffer(listing, offer, listingKey, offerKey, listingExists && !listingCancelled, offerExists && !offerCancelled);
-            emit OrderMatched(listingKey, offerKey, listing, offer, offer.price);
+            fillPrice = offer.price;
         } else {
             revert("sender must be listing maker or offer maker");
         }
+
+        emit OrderMatched(listingKey, offerKey, msg.sender, listing, offer, fillPrice);
     }
 
     // @dev Buyer accepts listing: listing must exist and not cancelled; offer must NOT exist, buyer sends fresh ETH equal or above listing price
@@ -191,6 +195,7 @@ contract OrderBook is IOrderBook, OrderStorage, OrderState, ProtocolFeeManager {
         // load order from storage
         OrderTypes.Order memory order = orders[orderKey];
         // validate order
+        require(msg.sender == order.maker, "only maker can cancel");
         OrderValidator._validateOrder(order, true);
         // mark order as cancelled
         _cancelOrder(orderKey);

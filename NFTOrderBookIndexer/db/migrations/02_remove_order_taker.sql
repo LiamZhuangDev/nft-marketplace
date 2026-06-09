@@ -1,0 +1,2 @@
+ALTER TABLE nft_orders
+    DROP COLUMN IF EXISTS taker;

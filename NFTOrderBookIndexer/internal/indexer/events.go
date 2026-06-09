@@ -40,6 +40,7 @@ const orderbookABI = `[
 		"inputs": [
 			{"indexed": true, "internalType": "OrderKey", "name": "listingOrderKey", "type": "bytes32"},
 			{"indexed": true, "internalType": "OrderKey", "name": "offerOrderKey", "type": "bytes32"},
+			{"indexed": true, "internalType": "address", "name": "taker", "type": "address"},
 			{
 				"components": [
 					{"internalType": "uint8", "name": "side", "type": "uint8"},
@@ -231,7 +232,6 @@ func (d *eventDecoder) DecodeOrderCreated(log types.Log, chainID int64) (*orderC
 		CollectionAddress: collection,
 		TokenID:           tokenID,
 		Maker:             maker,
-		Taker:             zeroAddress,
 		Price:             price,
 		QuantityRemaining: amount,
 		Size:              amount,
@@ -289,8 +289,8 @@ func (d *eventDecoder) DecodeOrderCancelled(log types.Log, chainID int64) (*mode
 }
 
 func (d *eventDecoder) DecodeOrderMatched(log types.Log, chainID int64) (*model.OrderMatched, error) {
-	if len(log.Topics) < 3 {
-		return nil, fmt.Errorf("OrderMatched has %d topics, expected at least 3", len(log.Topics))
+	if len(log.Topics) < 4 {
+		return nil, fmt.Errorf("OrderMatched has %d topics, expected at least 4", len(log.Topics))
 	}
 
 	var data orderMatchedData
@@ -302,6 +302,7 @@ func (d *eventDecoder) DecodeOrderMatched(log types.Log, chainID int64) (*model.
 		ChainID:        chainID,
 		ListingOrderID: log.Topics[1].Hex(),
 		OfferOrderID:   log.Topics[2].Hex(),
+		Taker:          common.BytesToAddress(log.Topics[3].Bytes()).Hex(),
 		Listing:        toMatchedOrderSnapshot(data.Listing),
 		Offer:          toMatchedOrderSnapshot(data.Offer),
 		FillPrice:      data.FillPrice.String(),

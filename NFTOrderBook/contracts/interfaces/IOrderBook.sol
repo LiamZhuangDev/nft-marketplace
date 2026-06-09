@@ -20,6 +20,7 @@ interface IOrderBook {
     event OrderMatched(
         OrderKey indexed listingOrderKey,
         OrderKey indexed offerOrderKey,
+        address indexed taker,
         OrderTypes.Order listing,
         OrderTypes.Order offer,
         uint128 fillPrice

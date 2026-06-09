@@ -17,7 +17,6 @@ CREATE TABLE IF NOT EXISTS nft_orders (
     collection_address VARCHAR(42) NOT NULL,
     token_id VARCHAR(128) NOT NULL,
     maker VARCHAR(42) NOT NULL,
-    taker VARCHAR(42) NOT NULL,
     price DECIMAL(65, 0) NOT NULL,
     quantity_remaining BIGINT UNSIGNED NOT NULL,
     size BIGINT UNSIGNED NOT NULL,
