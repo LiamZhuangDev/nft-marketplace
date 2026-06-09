@@ -38,86 +38,88 @@ Runtime dependencies:
 
 ## Data Flow
 
-```text
-                 EasySwap DEX Contract
-          OrderCreated / OrderMatched / OrderCancelled
-                           |
-                           | RPC FilterLogs()
-                           v
-        EasySwapSync orderbookindexer.SyncOrderBookEventLoop
-        service/orderbookindexer/service.go
-                           |
-          +----------------+----------------+
-          |                |                |
-          v                v                v
-  OrderCreated    OrderMatched    OrderCancelled
-   create order    match order      cancel order
-          |                |                |
-          |                |                |
-          v                v                v
-      MySQL DB         MySQL DB         MySQL DB
-   ob_order_*       ob_order_*       ob_order_*
-   ob_item_*        ob_item_*        ob_activity_*
-   ob_activity_*    ob_activity_*
-   ob_collection_*  owner/list state
-          |                |                |
-          |                |                |
-          v                v                v
-       Redis            Redis            Redis
- cache:es:orders:*  cache:es:trade:* cache:es:trade:*
- new listing queue  sale event queue cancel event queue
-          |                |                |
-          +----------------+----------------+
-                           v
-                  EasySwapBase OrderManager
-                           |
-       +-------------------+-------------------+
-       v                   v                   v
- ListenNewListingLoop  floorPriceProcess  orderExpiryProcess
- new listing queue     trade event queue  time-wheel expiry
-       |                   |                   |
-       v                   v                   v
-   schedules expiry    updates floor      marks expired
-   pushes listing      price in DB        pushes expired event
-   floor event         updates list cnt
+```mermaid
+flowchart TD
+    A[NFTOrderBook contract] -->|OrderCreated / OrderCancelled / OrderMatched| B[EVM RPC]
+    B -->|FilterLogs from checkpoint range| C[indexer.SyncNextBatch]
+
+    C --> D{Decode event}
+
+    D -->|OrderCreated| E[SaveOrderCreated]
+    D -->|OrderCancelled| F[SaveOrderCancelled]
+    D -->|OrderMatched| G[SaveOrderMatched]
+
+    E --> H[(MySQL nft_orders, nft_items and nft_activities)]
+    F --> H
+    G --> H
+
+    E --> I[Redis floor price event]
+    F --> I
+    G --> I
+
+    I -->|RPUSH nft-orderbook-indexer:floor-price-events| L[(Redis)]
+    L -->|LPOP pending jobs| M[processFloorPriceEvents]
+    M --> N[UpdateCollectionFloorPrice]
+    N --> O[(MySQL nft_collections)]
+
+    C --> P[(MySQL indexer_checkpoints)]
 ```
+
+The important rule is: MySQL receives the canonical event write first. Redis only receives a lightweight follow-up message saying "this collection's floor price should be recalculated."
+
+Current floor price is recomputed from active listing rows:
+
+```sql
+SELECT MIN(price), COUNT(*)
+FROM nft_orders
+WHERE chain_id = ?
+  AND collection_address = ?
+  AND order_type = 'listing'
+  AND order_status = 'active'
+  AND quantity_remaining > 0
+  AND (expire_time = 0 OR expire_time > UNIX_TIMESTAMP());
+```
+
+The result is stored in `nft_collections.floor_price` and `nft_collections.active_listing_count`.
 
 ## Database Tables
 
-The migration file is in `db/migrations/01_create.sql`. It creates chain-suffixed tables such as:
+The migration files are in `db/migrations/`. The learning indexer currently writes these tables:
 
-- `ob_order_<chain>`: indexed order records.
-- `ob_activity_<chain>`: listing, bid, sale, cancel, and approval activity.
-- `ob_item_<chain>`: item ownership and listing state.
-- `ob_item_external_<chain>`: item metadata/image placeholders.
-- `ob_collection_<chain>`: collection records and current floor price.
-- `ob_collection_floor_price_<chain>`: floor price history.
-- `ob_indexed_status`: sync checkpoints.
+- `indexer_checkpoints`: last indexed block per chain/indexer.
+- `nft_orders`: current order state.
+- `nft_items`: item owner and current listing state.
+- `nft_activities`: immutable activity/feed rows from order events.
+- `nft_collections`: collection-level derived state, including current floor price and active listing count.
 
-Important: `SyncOrderBookEventLoop` expects an `ob_indexed_status` row for the target chain and `index_type = 6`. If it is missing, the orderbook event loop exits.
+The checkpoint row is created automatically by `SaveLastIndexedBlock` after a successful batch. If no checkpoint exists yet, the indexer starts from `chain.start_block` in your config.
 
-Example for Sepolia:
+Example checkpoint query:
 
 ```sql
-INSERT INTO ob_indexed_status
-  (chain_id, last_indexed_block, last_indexed_time, index_type, create_time, update_time)
-VALUES
-  (11155111, 0, UNIX_TIMESTAMP(), 6, UNIX_TIMESTAMP(), UNIX_TIMESTAMP());
+SELECT chain_id, indexer_name, last_indexed_block
+FROM indexer_checkpoints;
 ```
-
-Set `last_indexed_block` to the block where you want indexing to begin.
 
 ## Redis Queues
 
-Redis is not the durable source of truth. It is used for fast background coordination by the order manager.
+Redis is not the durable source of truth. In this milestone, it is used as a small queue for derived floor-price work.
 
 Primary keys:
 
-- `cache:es:orders:<chain>`: new listing/order queue.
-- `cache:es:trade:events:<chain>`: listing, sale, cancel, expired, transfer, and floor-price update events.
-- `cache:es:<chain>:collection:listed:<collection>`: cached listed-count values.
+- `nft-orderbook-indexer:floor-price-events`: JSON queue of collections whose floor price should be recalculated.
 
-The indexer writes canonical state to MySQL first, then pushes events into Redis so `EasySwapBase/ordermanager` can process derived state.
+Each queue item has this shape:
+
+```json
+{
+  "chain_id": 11155111,
+  "collection_address": "0x...",
+  "reason": "order_created"
+}
+```
+
+The daemon writes canonical order/item/activity rows to MySQL first, pushes a queue item to Redis, then drains pending queue items and updates `nft_collections`.
 
 ## Prerequisites
 
@@ -163,11 +165,13 @@ The default compose files create:
 
 ## Initialize Database
 
-Apply the migrations in order:
+For an existing local database, apply migrations in order:
 
 ```shell
 mysql -h 127.0.0.1 -P 3306 -u easyuser -peasypasswd easyswap < db/migrations/01_create.sql
-mysql -h 127.0.0.1 -P 3306 -u easyuser -peasypasswd easyswap < db/migrations/02_alter_collection_add_banner.sql
+mysql -h 127.0.0.1 -P 3306 -u easyuser -peasypasswd easyswap < db/migrations/02_remove_order_taker.sql
+mysql -h 127.0.0.1 -P 3306 -u easyuser -peasypasswd easyswap < db/migrations/03_add_activity_counter_order_id.sql
+mysql -h 127.0.0.1 -P 3306 -u easyuser -peasypasswd easyswap < db/migrations/04_create_collections.sql
 ```
 
 Then insert or update the `ob_indexed_status` checkpoint for your chain and starting block.
@@ -180,41 +184,7 @@ Create the runtime config file expected by the CLI:
 cp "config/config_import.toml copy.template" config/config_import.toml
 ```
 
-Edit `config/config_import.toml` and verify these sections:
-
-```toml
-[project_cfg]
-name = "OrderBookDex"
-
-[db]
-database = "easyswap"
-host = "127.0.0.1"
-port = 3306
-user = "easyuser"
-password = "easypasswd"
-
-[kv]
-[[kv.redis]]
-host = "127.0.0.1:6379"
-type = "node"
-pass = ""
-
-[ankr_cfg]
-https_url = "https://rpc.ankr.com/eth_sepolia"
-api_key = ""
-
-[chain_cfg]
-name = "sepolia"
-id = 11155111
-
-[contract_cfg]
-eth_address = "0x0000000000000000000000000000000000000000"
-weth_address = "..."
-dex_address = "..."
-vault_address = "..."
-```
-
-The service reads config from `./config/config_import.toml` by default. You can pass another file with `-c`.
+Edit `config/config_import.toml` and verify configurations.
 
 ## Run
 
@@ -444,6 +414,15 @@ What changed:
 ```
 
 ### Milestone 8: Redis event consumer updates floor price
+Github commit: <commit_uri>
+What changed:
+```text
+1. Added Redis floor-price queue: floorprice_queue.go
+2. Indexer now enqueues a floor-price refresh after OrderCreated, OrderCancelled, and OrderMatched.
+3. App daemon now consumes pending Redis floor-price events after each batch.
+4. DB store recomputes floor price from active listings and writes nft_collections table
+5. Added nft_collections schema to fresh migration and exiting-db migration
+```
 ### Milestone 9: order expiry worker
 ### Milestone 10: README + diagrams + tests
 

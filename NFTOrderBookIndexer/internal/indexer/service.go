@@ -7,6 +7,7 @@ import (
 
 	"nft-orderbook-indexer/internal/chain"
 	"nft-orderbook-indexer/internal/config"
+	"nft-orderbook-indexer/internal/model"
 	"nft-orderbook-indexer/internal/store"
 )
 
@@ -15,23 +16,25 @@ type Service struct {
 	chain      *chain.Client
 	checkpoint *store.CheckpointStore
 	orderbook  *store.OrderbookStore
+	floorPrice *store.FloorPriceQueue
 	events     *eventDecoder
 }
 
 type BatchResult struct {
-	FromBlock           uint64
-	ToBlock             uint64
-	NextBlock           uint64
-	CurrentBlock        uint64
-	SafeBlock           uint64
-	LogCount            int
-	OrderCreatedCount   int
-	OrderCancelledCount int
-	OrderMatchedCount   int
-	NoBlocksReady       bool // No safe block to index as one of these two reasons: current block is not far enough ahead or checkpoint is already ahead of the safe block
+	FromBlock            uint64
+	ToBlock              uint64
+	NextBlock            uint64
+	CurrentBlock         uint64
+	SafeBlock            uint64
+	LogCount             int
+	OrderCreatedCount    int
+	OrderCancelledCount  int
+	OrderMatchedCount    int
+	FloorPriceEventCount int
+	NoBlocksReady        bool // No safe block to index as one of these two reasons: current block is not far enough ahead or checkpoint is already ahead of the safe block
 }
 
-func New(cfg *config.Config, db *sql.DB, chainClient *chain.Client) (*Service, error) {
+func New(cfg *config.Config, db *sql.DB, chainClient *chain.Client, floorPrice *store.FloorPriceQueue) (*Service, error) {
 	events, err := newEventDecoder()
 	if err != nil {
 		return nil, err
@@ -42,6 +45,7 @@ func New(cfg *config.Config, db *sql.DB, chainClient *chain.Client) (*Service, e
 		chain:      chainClient,
 		checkpoint: store.NewCheckpointStore(db),
 		orderbook:  store.NewOrderbookStore(db),
+		floorPrice: floorPrice,
 		events:     events,
 	}, nil
 }
@@ -84,6 +88,7 @@ func (s *Service) SyncNextBatch(ctx context.Context) (*BatchResult, error) {
 	orderCreatedCount := 0
 	orderCancelledCount := 0
 	orderMatchedCount := 0
+	floorPriceEventCount := 0
 	for _, log := range logs {
 		if s.events.IsOrderCreated(log) {
 			record, err := s.events.DecodeOrderCreated(log, s.cfg.Chain.ID)
@@ -94,7 +99,11 @@ func (s *Service) SyncNextBatch(ctx context.Context) (*BatchResult, error) {
 			if err := s.orderbook.SaveOrderCreated(ctx, record.order, record.item); err != nil {
 				return nil, fmt.Errorf("save OrderCreated tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
 			}
+			if err := s.enqueueFloorPriceEvent(ctx, record.order.CollectionAddress, "order_created"); err != nil {
+				return nil, fmt.Errorf("enqueue floor price event tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
+			}
 			orderCreatedCount++
+			floorPriceEventCount++
 			continue
 		}
 
@@ -104,10 +113,15 @@ func (s *Service) SyncNextBatch(ctx context.Context) (*BatchResult, error) {
 				return nil, fmt.Errorf("decode OrderCancelled tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
 			}
 
-			if err := s.orderbook.SaveOrderCancelled(ctx, *event); err != nil {
+			collectionAddress, err := s.orderbook.SaveOrderCancelled(ctx, *event)
+			if err != nil {
 				return nil, fmt.Errorf("save OrderCancelled tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
 			}
+			if err := s.enqueueFloorPriceEvent(ctx, collectionAddress, "order_cancelled"); err != nil {
+				return nil, fmt.Errorf("enqueue floor price event tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
+			}
 			orderCancelledCount++
+			floorPriceEventCount++
 			continue
 		}
 
@@ -120,7 +134,11 @@ func (s *Service) SyncNextBatch(ctx context.Context) (*BatchResult, error) {
 			if err := s.orderbook.SaveOrderMatched(ctx, *event); err != nil {
 				return nil, fmt.Errorf("save OrderMatched tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
 			}
+			if err := s.enqueueFloorPriceEvent(ctx, event.Listing.CollectionAddress, "order_matched"); err != nil {
+				return nil, fmt.Errorf("enqueue floor price event tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
+			}
 			orderMatchedCount++
+			floorPriceEventCount++
 		}
 	}
 
@@ -130,14 +148,23 @@ func (s *Service) SyncNextBatch(ctx context.Context) (*BatchResult, error) {
 	}
 
 	return &BatchResult{
-		FromBlock:           fromBlock,
-		ToBlock:             toBlock,
-		NextBlock:           nextBlock,
-		CurrentBlock:        currentBlock,
-		SafeBlock:           safeBlock,
-		LogCount:            len(logs),
-		OrderCreatedCount:   orderCreatedCount,
-		OrderCancelledCount: orderCancelledCount,
-		OrderMatchedCount:   orderMatchedCount,
+		FromBlock:            fromBlock,
+		ToBlock:              toBlock,
+		NextBlock:            nextBlock,
+		CurrentBlock:         currentBlock,
+		SafeBlock:            safeBlock,
+		LogCount:             len(logs),
+		OrderCreatedCount:    orderCreatedCount,
+		OrderCancelledCount:  orderCancelledCount,
+		OrderMatchedCount:    orderMatchedCount,
+		FloorPriceEventCount: floorPriceEventCount,
 	}, nil
+}
+
+func (s *Service) enqueueFloorPriceEvent(ctx context.Context, collectionAddress string, reason string) error {
+	return s.floorPrice.Enqueue(ctx, model.FloorPriceEvent{
+		ChainID:           s.cfg.Chain.ID,
+		CollectionAddress: collectionAddress,
+		Reason:            reason,
+	})
 }

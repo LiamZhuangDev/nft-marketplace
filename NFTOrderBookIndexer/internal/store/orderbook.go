@@ -58,25 +58,25 @@ func (s *OrderbookStore) SaveOrderCreated(ctx context.Context, order model.Order
 	return nil
 }
 
-func (s *OrderbookStore) SaveOrderCancelled(ctx context.Context, event model.OrderCancelled) error {
+func (s *OrderbookStore) SaveOrderCancelled(ctx context.Context, event model.OrderCancelled) (string, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+		return "", fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
 	order, err := getOrderForUpdate(ctx, tx, event.ChainID, event.OrderID)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if err := updateOrderCancelled(ctx, tx, event); err != nil {
-		return err
+		return "", err
 	}
 
 	if order.OrderType == "listing" {
 		if err := clearItemListing(ctx, tx, *order); err != nil {
-			return err
+			return "", err
 		}
 	}
 
@@ -95,13 +95,13 @@ func (s *OrderbookStore) SaveOrderCancelled(ctx context.Context, event model.Ord
 		LogIndex:          event.LogIndex,
 	}
 	if err := insertActivity(ctx, tx, activity); err != nil {
-		return err
+		return "", err
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit OrderCancelled tx: %w", err)
+		return "", fmt.Errorf("commit OrderCancelled tx: %w", err)
 	}
-	return nil
+	return order.CollectionAddress, nil
 }
 
 func (s *OrderbookStore) SaveOrderMatched(ctx context.Context, event model.OrderMatched) error {
@@ -377,6 +377,47 @@ func upsertItemOnListing(ctx context.Context, tx *sql.Tx, item model.Item) error
 	)
 	if err != nil {
 		return fmt.Errorf("upsert item %s/%s: %w", item.CollectionAddress, item.TokenID, err)
+	}
+	return nil
+}
+
+func (s *OrderbookStore) UpdateCollectionFloorPrice(ctx context.Context, event model.FloorPriceEvent) error {
+	var floorPrice sql.NullString
+	var activeListingCount uint64
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT MIN(price), COUNT(*)
+		 FROM nft_orders
+		 WHERE chain_id = ?
+		   AND collection_address = ?
+		   AND order_type = ?
+		   AND order_status = ?
+		   AND quantity_remaining > 0
+		   AND (expire_time = 0 OR expire_time > UNIX_TIMESTAMP())`,
+		event.ChainID,
+		event.CollectionAddress,
+		"listing",
+		"active",
+	).Scan(&floorPrice, &activeListingCount)
+	if err != nil {
+		return fmt.Errorf("query floor price %s: %w", event.CollectionAddress, err)
+	}
+
+	_, err = s.db.ExecContext(
+		ctx,
+		`INSERT INTO nft_collections (
+			chain_id, collection_address, floor_price, active_listing_count
+		) VALUES (?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE
+			floor_price = VALUES(floor_price),
+			active_listing_count = VALUES(active_listing_count)`,
+		event.ChainID,
+		event.CollectionAddress,
+		floorPrice,
+		activeListingCount,
+	)
+	if err != nil {
+		return fmt.Errorf("update collection floor price %s: %w", event.CollectionAddress, err)
 	}
 	return nil
 }

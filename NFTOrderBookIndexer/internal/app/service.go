@@ -16,8 +16,9 @@ type DependencyStatus struct {
 }
 
 type RunResult struct {
-	CurrentBlock uint64
-	Batch        *indexer.BatchResult
+	CurrentBlock              uint64
+	Batch                     *indexer.BatchResult
+	FloorPriceEventsProcessed int
 }
 
 func CheckDependencies(ctx context.Context, cfg *config.Config) (*DependencyStatus, error) {
@@ -89,7 +90,8 @@ func RunCheckpointBatch(ctx context.Context, cfg *config.Config) (*RunResult, er
 		return nil, fmt.Errorf("get current block: %w", err)
 	}
 
-	idx, err := indexer.New(cfg, db, chainClient)
+	floorPriceQueue := store.NewFloorPriceQueue(redisClient)
+	idx, err := indexer.New(cfg, db, chainClient, floorPriceQueue)
 	if err != nil {
 		return nil, fmt.Errorf("create indexer: %w", err)
 	}
@@ -98,8 +100,34 @@ func RunCheckpointBatch(ctx context.Context, cfg *config.Config) (*RunResult, er
 		return nil, err
 	}
 
+	orderbookStore := store.NewOrderbookStore(db)
+	floorPriceEventsProcessed, err := processFloorPriceEvents(ctx, floorPriceQueue, orderbookStore, 100)
+	if err != nil {
+		return nil, err
+	}
+
 	return &RunResult{
-		CurrentBlock: currentBlock,
-		Batch:        batch,
+		CurrentBlock:              currentBlock,
+		Batch:                     batch,
+		FloorPriceEventsProcessed: floorPriceEventsProcessed,
 	}, nil
+}
+
+func processFloorPriceEvents(ctx context.Context, queue *store.FloorPriceQueue, orderbook *store.OrderbookStore, limit int) (int, error) {
+	processed := 0
+	for processed < limit {
+		event, ok, err := queue.Dequeue(ctx)
+		if err != nil {
+			return processed, err
+		}
+		if !ok {
+			return processed, nil
+		}
+
+		if err := orderbook.UpdateCollectionFloorPrice(ctx, *event); err != nil {
+			return processed, err
+		}
+		processed++
+	}
+	return processed, nil
 }

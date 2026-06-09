@@ -43,6 +43,12 @@ type Activity struct {
 	LogIndex          uint
 }
 
+type FloorPriceEvent struct {
+	ChainID           int64  `json:"chain_id"`
+	CollectionAddress string `json:"collection_address"`
+	Reason            string `json:"reason"`
+}
+
 type OrderCancelled struct {
 	ChainID     int64
 	OrderID     string
