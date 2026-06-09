@@ -30,7 +30,7 @@ type Item struct {
 
 type Activity struct {
 	ChainID           int64
-	ActivityType      string
+	OrderType         string
 	OrderID           string
 	CollectionAddress string
 	TokenID           string

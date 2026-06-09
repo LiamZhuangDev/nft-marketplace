@@ -19,7 +19,7 @@ func NewOrderbookStore(db *sql.DB) *OrderbookStore {
 	return &OrderbookStore{db: db}
 }
 
-func (s *OrderbookStore) SaveOrderCreated(ctx context.Context, order model.Order, item model.Item, activity model.Activity) error {
+func (s *OrderbookStore) SaveOrderCreated(ctx context.Context, order model.Order, item model.Item) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -32,6 +32,21 @@ func (s *OrderbookStore) SaveOrderCreated(ctx context.Context, order model.Order
 	if err := upsertItemOnListing(ctx, tx, item); err != nil {
 		return err
 	}
+
+	activity := model.Activity{
+		ChainID:           order.ChainID,
+		OrderType:         order.OrderType,
+		OrderID:           order.OrderID,
+		CollectionAddress: order.CollectionAddress,
+		TokenID:           order.TokenID,
+		Maker:             order.Maker,
+		Taker:             zeroAddress,
+		Price:             order.Price,
+		BlockNumber:       order.BlockNumber,
+		TxHash:            order.TxHash,
+		LogIndex:          order.LogIndex,
+	}
+
 	if err := insertActivity(ctx, tx, activity); err != nil {
 		return err
 	}
@@ -66,7 +81,7 @@ func (s *OrderbookStore) SaveOrderCancelled(ctx context.Context, event model.Ord
 
 	activity := model.Activity{
 		ChainID:           event.ChainID,
-		ActivityType:      "order_cancelled",
+		OrderType:         "order_cancelled",
 		OrderID:           event.OrderID,
 		CollectionAddress: order.CollectionAddress,
 		TokenID:           order.TokenID,
@@ -110,7 +125,7 @@ func (s *OrderbookStore) SaveOrderMatched(ctx context.Context, event model.Order
 	}
 	activity := model.Activity{
 		ChainID:           event.ChainID,
-		ActivityType:      "order_matched",
+		OrderType:         "order_matched",
 		OrderID:           event.ListingOrderID,
 		CollectionAddress: event.Listing.CollectionAddress,
 		TokenID:           event.Listing.TokenID,
@@ -373,7 +388,7 @@ func insertActivity(ctx context.Context, tx *sql.Tx, activity model.Activity) er
 			price = VALUES(price),
 			block_number = VALUES(block_number)`,
 		activity.ChainID,
-		activity.ActivityType,
+		activity.OrderType,
 		activity.OrderID,
 		activity.CollectionAddress,
 		activity.TokenID,

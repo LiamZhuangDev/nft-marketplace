@@ -91,7 +91,7 @@ func (s *Service) SyncNextBatch(ctx context.Context) (*BatchResult, error) {
 				return nil, fmt.Errorf("decode OrderCreated tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
 			}
 
-			if err := s.orderbook.SaveOrderCreated(ctx, record.order, record.item, record.activity); err != nil {
+			if err := s.orderbook.SaveOrderCreated(ctx, record.order, record.item); err != nil {
 				return nil, fmt.Errorf("save OrderCreated tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
 			}
 			orderCreatedCount++

@@ -25,12 +25,6 @@ const (
 	orderTypeItemBid     = "item_bid"
 	orderTypeCollBid     = "collection_bid"
 
-	activityListing        = "listing"
-	activityItemBid        = "item_bid"
-	activityCollBid        = "collection_bid"
-	activityOrderCancelled = "order_cancelled"
-	activityOrderMatched   = "order_matched"
-
 	zeroAddress = "0x0000000000000000000000000000000000000000"
 )
 
@@ -150,9 +144,8 @@ type orderCreatedData struct {
 }
 
 type orderCreatedRecord struct {
-	order    model.Order
-	item     model.Item
-	activity model.Activity
+	order model.Order
+	item  model.Item
 }
 
 type orderMatchedData struct {
@@ -217,7 +210,7 @@ func (d *eventDecoder) DecodeOrderCreated(log types.Log, chainID int64) (*orderC
 	saleKind := uint8(new(big.Int).SetBytes(log.Topics[2].Bytes()).Uint64())
 	maker := common.BytesToAddress(log.Topics[3].Bytes()).Hex()
 
-	orderType, activityType := classifyMake(side, saleKind)
+	orderType := classifyOrderType(side, saleKind)
 	orderID := "0x" + hex.EncodeToString(data.OrderKey[:])
 	tokenID := data.Nft.TokenID.String()
 	collection := data.Nft.Collection.Hex()
@@ -252,24 +245,9 @@ func (d *eventDecoder) DecodeOrderCreated(log types.Log, chainID int64) (*orderC
 		ListTime:          log.BlockNumber,
 	}
 
-	activity := model.Activity{
-		ChainID:           chainID,
-		ActivityType:      activityType,
-		OrderID:           orderID,
-		CollectionAddress: collection,
-		TokenID:           tokenID,
-		Maker:             maker,
-		Taker:             zeroAddress,
-		Price:             price,
-		BlockNumber:       log.BlockNumber,
-		TxHash:            log.TxHash.Hex(),
-		LogIndex:          log.Index,
-	}
-
 	return &orderCreatedRecord{
-		order:    order,
-		item:     item,
-		activity: activity,
+		order: order,
+		item:  item,
 	}, nil
 }
 
@@ -326,12 +304,12 @@ func toMatchedOrderSnapshot(order abiOrder) model.MatchedOrderSnapshot {
 	}
 }
 
-func classifyMake(side, saleKind uint8) (orderType string, activityType string) {
+func classifyOrderType(side, saleKind uint8) (orderType string) {
 	if side == sideOffer {
 		if saleKind == saleKindCollection {
-			return orderTypeCollBid, activityCollBid
+			return orderTypeCollBid
 		}
-		return orderTypeItemBid, activityItemBid
+		return orderTypeItemBid
 	}
-	return orderTypeListing, activityListing
+	return orderTypeListing
 }
