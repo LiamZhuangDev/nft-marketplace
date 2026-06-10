@@ -334,7 +334,7 @@ func TestSyncNextBatchHandlesOrderEventsFromFakeChainLogs(t *testing.T) {
 		},
 	}
 
-	svc, err := indexer.NewWithDependencies(cfg, chain, checkpoint, orderbook, floorPrice, expiry)
+	svc, err := indexer.New(cfg, chain, checkpoint, orderbook, floorPrice, expiry)
 	if err != nil {
 		t.Fatalf("create indexer: %v", err)
 	}

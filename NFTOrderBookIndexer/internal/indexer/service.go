@@ -2,15 +2,12 @@ package indexer
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/core/types"
 
-	"nft-orderbook-indexer/internal/chain"
 	"nft-orderbook-indexer/internal/config"
 	"nft-orderbook-indexer/internal/model"
-	"nft-orderbook-indexer/internal/store"
 )
 
 type Service struct {
@@ -62,18 +59,7 @@ type BatchResult struct {
 	NoBlocksReady         bool // No safe block to index as one of these two reasons: current block is not far enough ahead or checkpoint is already ahead of the safe block
 }
 
-func New(cfg *config.Config, db *sql.DB, chainClient *chain.Client, floorPrice *store.FloorPriceQueue, expiry *store.OrderExpiryQueue) (*Service, error) {
-	return NewWithDependencies(
-		cfg,
-		chainClient,
-		store.NewCheckpointStore(db),
-		store.NewOrderbookStore(db),
-		floorPrice,
-		expiry,
-	)
-}
-
-func NewWithDependencies(cfg *config.Config, chainClient ChainReader, checkpoint CheckpointStore, orderbook OrderbookStore, floorPrice FloorPriceQueue, expiry OrderExpiryQueue) (*Service, error) {
+func New(cfg *config.Config, chainClient ChainReader, checkpoint CheckpointStore, orderbook OrderbookStore, floorPrice FloorPriceQueue, expiry OrderExpiryQueue) (*Service, error) {
 	events, err := newEventDecoder()
 	if err != nil {
 		return nil, err

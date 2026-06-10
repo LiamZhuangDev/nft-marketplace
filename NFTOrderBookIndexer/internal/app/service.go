@@ -16,14 +16,12 @@ import (
 )
 
 type RuntimeDependencies struct {
-	DB           *sql.DB
-	Redis        *redis.Client
-	Chain        *chain.Client
-	CurrentBlock uint64
+	DB    *sql.DB
+	Redis *redis.Client
+	Chain *chain.Client
 }
 
 type RunResult struct {
-	CurrentBlock               uint64
 	Batch                      *indexer.BatchResult
 	OrderExpiryEventsProcessed int
 	OrdersExpired              int
@@ -94,13 +92,6 @@ func CheckDependencies(ctx context.Context, cfg *config.Config) (*RuntimeDepende
 	}
 	deps.Chain = chainClient
 
-	currentBlock, err := chainClient.CurrentBlock(ctx)
-	if err != nil {
-		deps.Close()
-		return nil, fmt.Errorf("get current block: %w", err)
-	}
-	deps.CurrentBlock = currentBlock
-
 	return deps, nil
 }
 
@@ -125,7 +116,6 @@ func RunCheckpointBatch(ctx context.Context, cfg *config.Config) (*RunResult, er
 	}
 
 	return &RunResult{
-		CurrentBlock:               deps.CurrentBlock,
 		Batch:                      batch,
 		OrderExpiryEventsProcessed: backgroundWork.OrderExpiryEventsProcessed,
 		OrdersExpired:              backgroundWork.OrdersExpired,
@@ -136,7 +126,9 @@ func RunCheckpointBatch(ctx context.Context, cfg *config.Config) (*RunResult, er
 func runIndexerBatch(ctx context.Context, cfg *config.Config, deps *RuntimeDependencies) (*indexer.BatchResult, error) {
 	floorPriceQueue := store.NewFloorPriceQueue(deps.Redis)
 	orderExpiryQueue := store.NewOrderExpiryQueue(deps.Redis)
-	idx, err := indexer.New(cfg, deps.DB, deps.Chain, floorPriceQueue, orderExpiryQueue)
+	checkpointStore := store.NewCheckpointStore(deps.DB)
+	orderbookStore := store.NewOrderbookStore(deps.DB)
+	idx, err := indexer.New(cfg, deps.Chain, checkpointStore, orderbookStore, floorPriceQueue, orderExpiryQueue)
 	if err != nil {
 		return nil, fmt.Errorf("create indexer: %w", err)
 	}
