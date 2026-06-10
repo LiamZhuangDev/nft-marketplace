@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/ethereum/go-ethereum/core/types"
+
 	"nft-orderbook-indexer/internal/chain"
 	"nft-orderbook-indexer/internal/config"
 	"nft-orderbook-indexer/internal/model"
@@ -13,12 +15,36 @@ import (
 
 type Service struct {
 	cfg        *config.Config
-	chain      *chain.Client
-	checkpoint *store.CheckpointStore
-	orderbook  *store.OrderbookStore
-	floorPrice *store.FloorPriceQueue
-	expiry     *store.OrderExpiryQueue
+	chain      ChainReader
+	checkpoint CheckpointStore
+	orderbook  OrderbookStore
+	floorPrice FloorPriceQueue
+	expiry     OrderExpiryQueue
 	events     *eventDecoder
+}
+
+type ChainReader interface {
+	CurrentBlock(ctx context.Context) (uint64, error)
+	FilterLogs(ctx context.Context, fromBlock, toBlock uint64, address string) ([]types.Log, error)
+}
+
+type CheckpointStore interface {
+	LastIndexedBlock(ctx context.Context, chainID int64, defaultStart uint64) (uint64, error)
+	SaveLastIndexedBlock(ctx context.Context, chainID int64, nextBlock uint64) error
+}
+
+type OrderbookStore interface {
+	SaveOrderCreated(ctx context.Context, order model.Order, item model.Item) error
+	SaveOrderCancelled(ctx context.Context, event model.OrderCancelled) (string, error)
+	SaveOrderMatched(ctx context.Context, event model.OrderMatched) error
+}
+
+type FloorPriceQueue interface {
+	Enqueue(ctx context.Context, event model.FloorPriceEvent) error
+}
+
+type OrderExpiryQueue interface {
+	Schedule(ctx context.Context, event model.OrderExpiryEvent) error
 }
 
 type BatchResult struct {
@@ -37,6 +63,17 @@ type BatchResult struct {
 }
 
 func New(cfg *config.Config, db *sql.DB, chainClient *chain.Client, floorPrice *store.FloorPriceQueue, expiry *store.OrderExpiryQueue) (*Service, error) {
+	return NewWithDependencies(
+		cfg,
+		chainClient,
+		store.NewCheckpointStore(db),
+		store.NewOrderbookStore(db),
+		floorPrice,
+		expiry,
+	)
+}
+
+func NewWithDependencies(cfg *config.Config, chainClient ChainReader, checkpoint CheckpointStore, orderbook OrderbookStore, floorPrice FloorPriceQueue, expiry OrderExpiryQueue) (*Service, error) {
 	events, err := newEventDecoder()
 	if err != nil {
 		return nil, err
@@ -45,8 +82,8 @@ func New(cfg *config.Config, db *sql.DB, chainClient *chain.Client, floorPrice *
 	return &Service{
 		cfg:        cfg,
 		chain:      chainClient,
-		checkpoint: store.NewCheckpointStore(db),
-		orderbook:  store.NewOrderbookStore(db),
+		checkpoint: checkpoint,
+		orderbook:  orderbook,
 		floorPrice: floorPrice,
 		expiry:     expiry,
 		events:     events,

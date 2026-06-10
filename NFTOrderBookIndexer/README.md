@@ -2,7 +2,7 @@
 
 NFTOrderBookIndexer indexes `NFTOrderBook` events from an EVM chain into marketplace database tables and Redis-backed background queues.
 
-The service polls blockchain logs from the configured order book contract, decodes order events, writes canonical order/item/activity/collection state to MySQL, and pushes follow-up work into Redis for order expiry, floor price, and listed-count maintenance.
+The service polls blockchain logs from the configured order book contract, decodes order events, writes canonical order/item/activity/collection state to MySQL, and pushes follow-up work into Redis for order expiry and floor price maintenance.
 
 ## What It Syncs
 
@@ -11,9 +11,8 @@ The main indexer listens for these on-chain events:
 - `OrderCreated`: creates listing, collection bid, or item bid records.
 - `OrderMatched`: marks matched orders filled, records a sale, and updates item ownership/listing state.
 - `OrderCancelled`: marks orders cancelled and clears listing state when applicable.
-- `Approval`: records ERC721 approval activity and checks whether the vault is approved.
 
-The service also maintains collection floor price history and delegates order expiry/list-count work to `EasySwapBase/ordermanager`.
+The service also maintains current collection floor price and expires stale orders after their `expire_time`.
 
 ## Architecture
 
@@ -22,19 +21,20 @@ main.go
   -> cmd/root.go
      -> loads config through Cobra/Viper
   -> cmd/daemon.go
-     -> initializes config, logger, DB, Redis, chain client
-  -> service/service.go
-     -> wires MySQL, Redis, collection filter, order manager, orderbook indexer
-  -> service/orderbookindexer/service.go
+     -> loads config and calls app.RunCheckpointBatch
+  -> internal/app/service.go
+     -> wires MySQL, Redis, chain client, indexer, and workers
+  -> internal/indexer/service.go
      -> polls blockchain logs and writes indexed state
+  -> internal/store/*.go
+     -> wraps MySQL and Redis persistence details
 ```
 
 Runtime dependencies:
 
 - MySQL: durable source of truth for indexed marketplace state.
-- Redis: fast queues/cache for background order manager work.
-- EVM RPC endpoint: used to fetch block numbers, logs, block timestamps, and contract metadata.
-- `EasySwapBase`: shared chain, DB model, Redis, logger, and order manager code.
+- Redis: lightweight queue storage for derived background work.
+- EVM RPC endpoint: used to fetch block numbers and contract logs.
 
 ## Data Flow
 
@@ -90,6 +90,24 @@ WHERE chain_id = ?
 
 The result is stored in `nft_collections.floor_price` and `nft_collections.active_listing_count`.
 
+## Expiry/Floor-price Worker Flow
+
+```mermaid
+flowchart LR
+    A[OrderCreated with expire_time] --> B[Schedule OrderExpiryEvent]
+    B --> C[(Redis sorted set)]
+    C --> D[processOrderExpiryEvents]
+    D --> E{Still active and expired?}
+    E -->|No| F[Ignore stale job]
+    E -->|Yes| G[Mark order expired]
+    G --> H{Listing order?}
+    H -->|No| I[Done]
+    H -->|Yes| J[Clear nft_items listing state]
+    J --> K[Enqueue FloorPriceEvent]
+    K --> L[processFloorPriceEvents]
+    L --> M[Recompute collection floor price]
+```
+
 ## Database Tables
 
 The migration files are in `db/migrations/`. The learning indexer currently writes these tables:
@@ -142,23 +160,18 @@ The daemon writes canonical order/item/activity rows to MySQL first, schedules e
 
 ## Prerequisites
 
-- Go 1.21+
+- Go 1.25+
 - Docker and Docker Compose, for local MySQL/Redis
 - MySQL 8.0
 - Redis 6.2+
 - An EVM RPC URL for the configured chain
-- A sibling `EasySwapBase` checkout, because `go.mod` uses:
-
-```text
-replace github.com/ProjectsTask/EasySwapBase => ../EasySwapBase
-```
 
 Expected local layout:
 
 ```text
 nft-marketplace/
-  EasySwapSync/
-  EasySwapBase/
+  NFTOrderBook/
+  NFTOrderBookIndexer/
 ```
 
 ## Start MySQL and Redis
@@ -167,12 +180,6 @@ For amd64:
 
 ```shell
 docker-compose up -d
-```
-
-For arm64:
-
-```shell
-docker-compose -f docker-compose-arm64.yml up -d
 ```
 
 The default compose files create:
@@ -193,47 +200,44 @@ mysql -h 127.0.0.1 -P 3306 -u easyuser -peasypasswd easyswap < db/migrations/03_
 mysql -h 127.0.0.1 -P 3306 -u easyuser -peasypasswd easyswap < db/migrations/04_create_collections.sql
 ```
 
-Then insert or update the `ob_indexed_status` checkpoint for your chain and starting block.
+The checkpoint row is created by the daemon after the first successful batch. The initial batch starts from `chain.start_block` in your config.
 
 ## Configure
 
 Create the runtime config file expected by the CLI:
 
 ```shell
-cp "config/config_import.toml copy.template" config/config_import.toml
+cp config/config.toml.example config/config.toml
 ```
 
-Edit `config/config_import.toml` and verify configurations.
+Edit `config/config.toml` and verify:
+
+- `db.*` points at your local MySQL.
+- `redis.*` points at your local Redis.
+- `chain.rpc_url` includes a working API key if your RPC provider requires one.
+- `chain.start_block` is near the deployment block of your `NFTOrderBook` contract.
+- `contract.orderbook_address` is the deployed `NFTOrderBook` address.
 
 ## Run
 
 Run directly:
 
 ```shell
-go run main.go daemon -c "./config/config_import.toml"
+go run . daemon -c ./config/config.toml
 ```
 
-Or use the Makefile:
+Run tests:
 
 ```shell
-make run
+go test ./...
 ```
 
 Build only:
 
 ```shell
-make build
-./build/sync_service daemon -c "./config/config_import.toml"
+go build -o ./bin/nft-orderbook-indexer .
+./bin/nft-orderbook-indexer daemon -c ./config/config.toml
 ```
-
-Run in the background:
-
-```shell
-mkdir -p logs
-./run.sh
-```
-
-If `monitor.pprof_enable = true`, pprof is exposed on `0.0.0.0:<monitor.pprof_port>`.
 
 ## Rebuild Path from `EasySwapSync`
 
@@ -445,7 +449,7 @@ What changed:
 5. Added nft_collections schema to fresh migration and exiting-db migration
 ```
 ### Milestone 9: order expiry worker
-[Git Commit](commit_uri_placeholder)
+[Git Commit](https://github.com/LiamZhuangDev/nft-marketplace/commit/fa2219a8607923d7ec25cd808e4e1c29c5162d7b)
 What changed:
 ```text
 1. Added Redis order-expiry sorted set: order_expiry_queue.go
@@ -455,6 +459,14 @@ What changed:
 5. Expired listing orders clear item listing state and enqueue a floor-price refresh.
 ```
 ### Milestone 10: README + diagrams + tests
+What changed:
+```text
+1. Updated README architecture, setup, run, troubleshooting, Redis, and data-flow notes.
+2. Added Mermaid diagrams for the chain-to-DB/Redis path and background workers.
+3. Added dependency-free tests in internal/test for worker loops and fake-chain order events.
+4. Refactored app worker helpers to accept small interfaces, so they can be tested with fakes.
+5. Verified the project with go test ./...
+```
 
 ---
 
@@ -471,28 +483,29 @@ What changed:
 Missing config:
 
 ```text
-panic: open ./config/config_import.toml: no such file or directory
+open ./config/config.toml: no such file or directory
 ```
 
-Create `config/config_import.toml` from the template.
+Create `config/config.toml` from the template.
 
-Orderbook loop exits immediately:
+RPC says unauthorized:
 
 ```text
-failed on get listing index status
+Unauthorized: You must authenticate your request with an API key
 ```
 
-Insert the `ob_indexed_status` row for `index_type = 6`.
+Use an RPC URL with a valid API key, or switch to a public endpoint that supports the target chain.
 
 No logs are indexed:
 
-- Check `contract_cfg.dex_address`.
-- Check `chain_cfg.id` and `chain_cfg.name`.
+- Check `contract.orderbook_address`.
+- Check `chain.id` and `chain.name`.
 - Check the RPC URL and API key.
-- Check that `last_indexed_block` is before the contract events you expect.
+- Check that `chain.start_block` is before the contract events you expect.
+- Check `indexer_checkpoints.last_indexed_block` if you already ran the daemon.
 
 Redis queue not moving:
 
 - Confirm Redis is running.
-- Check the configured `kv.redis.host`.
-- Confirm `OrderManager.Start()` is running with the daemon.
+- Check the configured `redis.host`.
+- Run `go run . daemon -c ./config/config.toml`; this one command processes checkpoint, expiry, and floor-price work for the learning build.

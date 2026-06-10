@@ -2,8 +2,11 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 
 	"nft-orderbook-indexer/internal/chain"
 	"nft-orderbook-indexer/internal/config"
@@ -12,7 +15,10 @@ import (
 	"nft-orderbook-indexer/internal/store"
 )
 
-type DependencyStatus struct {
+type RuntimeDependencies struct {
+	DB           *sql.DB
+	Redis        *redis.Client
+	Chain        *chain.Client
 	CurrentBlock uint64
 }
 
@@ -24,78 +30,113 @@ type RunResult struct {
 	FloorPriceEventsProcessed  int
 }
 
-func CheckDependencies(ctx context.Context, cfg *config.Config) (*DependencyStatus, error) {
+type BackgroundWorkResult struct {
+	OrderExpiryEventsProcessed int
+	OrdersExpired              int
+	FloorPriceEventsProcessed  int
+}
+
+type FloorPriceQueue interface {
+	Enqueue(ctx context.Context, event model.FloorPriceEvent) error
+	Dequeue(ctx context.Context) (*model.FloorPriceEvent, bool, error)
+}
+
+type OrderExpiryQueue interface {
+	DequeueDue(ctx context.Context, now uint64) (*model.OrderExpiryEvent, bool, error)
+}
+
+type OrderbookStore interface {
+	ExpireOrder(ctx context.Context, event model.OrderExpiryEvent, now uint64) (*model.Order, bool, error)
+	UpdateCollectionFloorPrice(ctx context.Context, event model.FloorPriceEvent) error
+}
+
+func (d *RuntimeDependencies) Close() {
+	if d.Chain != nil {
+		d.Chain.Close()
+	}
+	if d.Redis != nil {
+		_ = d.Redis.Close()
+	}
+	if d.DB != nil {
+		_ = d.DB.Close()
+	}
+}
+
+func CheckDependencies(ctx context.Context, cfg *config.Config) (*RuntimeDependencies, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+
+	deps := &RuntimeDependencies{}
 
 	db, err := store.OpenDB(cfg.DB)
 	if err != nil {
 		return nil, fmt.Errorf("open mysql: %w", err)
 	}
-	defer db.Close()
+	deps.DB = db
 
 	if err := db.PingContext(ctx); err != nil {
+		deps.Close()
 		return nil, fmt.Errorf("ping mysql: %w", err)
 	}
 
 	redisClient := store.OpenRedis(cfg.Redis)
-	defer redisClient.Close()
+	deps.Redis = redisClient
 
 	if err := redisClient.Ping(ctx).Err(); err != nil {
+		deps.Close()
 		return nil, fmt.Errorf("ping redis: %w", err)
 	}
 
 	chainClient, err := chain.Dial(ctx, cfg.Chain)
 	if err != nil {
+		deps.Close()
 		return nil, fmt.Errorf("connect chain rpc: %w", err)
 	}
-	defer chainClient.Close()
+	deps.Chain = chainClient
 
 	currentBlock, err := chainClient.CurrentBlock(ctx)
 	if err != nil {
+		deps.Close()
 		return nil, fmt.Errorf("get current block: %w", err)
 	}
+	deps.CurrentBlock = currentBlock
 
-	return &DependencyStatus{
-		CurrentBlock: currentBlock,
-	}, nil
+	return deps, nil
 }
 
 func RunCheckpointBatch(ctx context.Context, cfg *config.Config) (*RunResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	db, err := store.OpenDB(cfg.DB)
+	deps, err := CheckDependencies(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("open mysql: %w", err)
+		return nil, err
 	}
-	defer db.Close()
+	defer deps.Close()
 
-	if err := db.PingContext(ctx); err != nil {
-		return nil, fmt.Errorf("ping mysql: %w", err)
-	}
-
-	redisClient := store.OpenRedis(cfg.Redis)
-	defer redisClient.Close()
-
-	if err := redisClient.Ping(ctx).Err(); err != nil {
-		return nil, fmt.Errorf("ping redis: %w", err)
-	}
-
-	chainClient, err := chain.Dial(ctx, cfg.Chain)
+	batch, err := runIndexerBatch(ctx, cfg, deps)
 	if err != nil {
-		return nil, fmt.Errorf("connect chain rpc: %w", err)
+		return nil, err
 	}
-	defer chainClient.Close()
 
-	currentBlock, err := chainClient.CurrentBlock(ctx)
+	backgroundWork, err := processBackgroundWork(ctx, deps)
 	if err != nil {
-		return nil, fmt.Errorf("get current block: %w", err)
+		return nil, err
 	}
 
-	floorPriceQueue := store.NewFloorPriceQueue(redisClient)
-	orderExpiryQueue := store.NewOrderExpiryQueue(redisClient)
-	idx, err := indexer.New(cfg, db, chainClient, floorPriceQueue, orderExpiryQueue)
+	return &RunResult{
+		CurrentBlock:               deps.CurrentBlock,
+		Batch:                      batch,
+		OrderExpiryEventsProcessed: backgroundWork.OrderExpiryEventsProcessed,
+		OrdersExpired:              backgroundWork.OrdersExpired,
+		FloorPriceEventsProcessed:  backgroundWork.FloorPriceEventsProcessed,
+	}, nil
+}
+
+func runIndexerBatch(ctx context.Context, cfg *config.Config, deps *RuntimeDependencies) (*indexer.BatchResult, error) {
+	floorPriceQueue := store.NewFloorPriceQueue(deps.Redis)
+	orderExpiryQueue := store.NewOrderExpiryQueue(deps.Redis)
+	idx, err := indexer.New(cfg, deps.DB, deps.Chain, floorPriceQueue, orderExpiryQueue)
 	if err != nil {
 		return nil, fmt.Errorf("create indexer: %w", err)
 	}
@@ -104,26 +145,30 @@ func RunCheckpointBatch(ctx context.Context, cfg *config.Config) (*RunResult, er
 		return nil, err
 	}
 
-	orderbookStore := store.NewOrderbookStore(db)
-	orderExpiryEventsProcessed, ordersExpired, err := processOrderExpiryEvents(ctx, orderExpiryQueue, floorPriceQueue, orderbookStore, 100)
+	return batch, nil
+}
+
+func processBackgroundWork(ctx context.Context, deps *RuntimeDependencies) (*BackgroundWorkResult, error) {
+	floorPriceQueue := store.NewFloorPriceQueue(deps.Redis)
+	orderExpiryQueue := store.NewOrderExpiryQueue(deps.Redis)
+	orderbookStore := store.NewOrderbookStore(deps.DB)
+	orderExpiryEventsProcessed, ordersExpired, err := ProcessOrderExpiryEvents(ctx, orderExpiryQueue, floorPriceQueue, orderbookStore, 100)
 	if err != nil {
 		return nil, err
 	}
-	floorPriceEventsProcessed, err := processFloorPriceEvents(ctx, floorPriceQueue, orderbookStore, 100)
+	floorPriceEventsProcessed, err := ProcessFloorPriceEvents(ctx, floorPriceQueue, orderbookStore, 100)
 	if err != nil {
 		return nil, err
 	}
 
-	return &RunResult{
-		CurrentBlock:               currentBlock,
-		Batch:                      batch,
+	return &BackgroundWorkResult{
 		OrderExpiryEventsProcessed: orderExpiryEventsProcessed,
 		OrdersExpired:              ordersExpired,
 		FloorPriceEventsProcessed:  floorPriceEventsProcessed,
 	}, nil
 }
 
-func processOrderExpiryEvents(ctx context.Context, expiryQueue *store.OrderExpiryQueue, floorPriceQueue *store.FloorPriceQueue, orderbook *store.OrderbookStore, limit int) (int, int, error) {
+func ProcessOrderExpiryEvents(ctx context.Context, expiryQueue OrderExpiryQueue, floorPriceQueue FloorPriceQueue, orderbook OrderbookStore, limit int) (int, int, error) {
 	processed := 0
 	expired := 0
 	now := uint64(time.Now().Unix())
@@ -161,7 +206,7 @@ func processOrderExpiryEvents(ctx context.Context, expiryQueue *store.OrderExpir
 	return processed, expired, nil
 }
 
-func processFloorPriceEvents(ctx context.Context, queue *store.FloorPriceQueue, orderbook *store.OrderbookStore, limit int) (int, error) {
+func ProcessFloorPriceEvents(ctx context.Context, queue FloorPriceQueue, orderbook OrderbookStore, limit int) (int, error) {
 	processed := 0
 	for processed < limit {
 		event, ok, err := queue.Dequeue(ctx)
