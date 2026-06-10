@@ -8,6 +8,7 @@ import (
 	"nft-orderbook-indexer/internal/chain"
 	"nft-orderbook-indexer/internal/config"
 	"nft-orderbook-indexer/internal/indexer"
+	"nft-orderbook-indexer/internal/model"
 	"nft-orderbook-indexer/internal/store"
 )
 
@@ -16,9 +17,11 @@ type DependencyStatus struct {
 }
 
 type RunResult struct {
-	CurrentBlock              uint64
-	Batch                     *indexer.BatchResult
-	FloorPriceEventsProcessed int
+	CurrentBlock               uint64
+	Batch                      *indexer.BatchResult
+	OrderExpiryEventsProcessed int
+	OrdersExpired              int
+	FloorPriceEventsProcessed  int
 }
 
 func CheckDependencies(ctx context.Context, cfg *config.Config) (*DependencyStatus, error) {
@@ -91,7 +94,8 @@ func RunCheckpointBatch(ctx context.Context, cfg *config.Config) (*RunResult, er
 	}
 
 	floorPriceQueue := store.NewFloorPriceQueue(redisClient)
-	idx, err := indexer.New(cfg, db, chainClient, floorPriceQueue)
+	orderExpiryQueue := store.NewOrderExpiryQueue(redisClient)
+	idx, err := indexer.New(cfg, db, chainClient, floorPriceQueue, orderExpiryQueue)
 	if err != nil {
 		return nil, fmt.Errorf("create indexer: %w", err)
 	}
@@ -101,16 +105,60 @@ func RunCheckpointBatch(ctx context.Context, cfg *config.Config) (*RunResult, er
 	}
 
 	orderbookStore := store.NewOrderbookStore(db)
+	orderExpiryEventsProcessed, ordersExpired, err := processOrderExpiryEvents(ctx, orderExpiryQueue, floorPriceQueue, orderbookStore, 100)
+	if err != nil {
+		return nil, err
+	}
 	floorPriceEventsProcessed, err := processFloorPriceEvents(ctx, floorPriceQueue, orderbookStore, 100)
 	if err != nil {
 		return nil, err
 	}
 
 	return &RunResult{
-		CurrentBlock:              currentBlock,
-		Batch:                     batch,
-		FloorPriceEventsProcessed: floorPriceEventsProcessed,
+		CurrentBlock:               currentBlock,
+		Batch:                      batch,
+		OrderExpiryEventsProcessed: orderExpiryEventsProcessed,
+		OrdersExpired:              ordersExpired,
+		FloorPriceEventsProcessed:  floorPriceEventsProcessed,
 	}, nil
+}
+
+func processOrderExpiryEvents(ctx context.Context, expiryQueue *store.OrderExpiryQueue, floorPriceQueue *store.FloorPriceQueue, orderbook *store.OrderbookStore, limit int) (int, int, error) {
+	processed := 0
+	expired := 0
+	now := uint64(time.Now().Unix())
+	for processed < limit {
+		event, ok, err := expiryQueue.DequeueDue(ctx, now)
+		if err != nil {
+			return processed, expired, err
+		}
+		if !ok {
+			return processed, expired, nil
+		}
+		processed++
+
+		order, didExpire, err := orderbook.ExpireOrder(ctx, *event, now)
+		if err != nil {
+			return processed, expired, err
+		}
+		if !didExpire {
+			continue
+		}
+
+		expired++
+		if order.OrderType != "listing" {
+			continue
+		}
+
+		if err := floorPriceQueue.Enqueue(ctx, model.FloorPriceEvent{
+			ChainID:           order.ChainID,
+			CollectionAddress: order.CollectionAddress,
+			Reason:            "order_expired",
+		}); err != nil {
+			return processed, expired, err
+		}
+	}
+	return processed, expired, nil
 }
 
 func processFloorPriceEvents(ctx context.Context, queue *store.FloorPriceQueue, orderbook *store.OrderbookStore, limit int) (int, error) {

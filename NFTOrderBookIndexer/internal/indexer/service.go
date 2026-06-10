@@ -17,24 +17,26 @@ type Service struct {
 	checkpoint *store.CheckpointStore
 	orderbook  *store.OrderbookStore
 	floorPrice *store.FloorPriceQueue
+	expiry     *store.OrderExpiryQueue
 	events     *eventDecoder
 }
 
 type BatchResult struct {
-	FromBlock            uint64
-	ToBlock              uint64
-	NextBlock            uint64
-	CurrentBlock         uint64
-	SafeBlock            uint64
-	LogCount             int
-	OrderCreatedCount    int
-	OrderCancelledCount  int
-	OrderMatchedCount    int
-	FloorPriceEventCount int
-	NoBlocksReady        bool // No safe block to index as one of these two reasons: current block is not far enough ahead or checkpoint is already ahead of the safe block
+	FromBlock             uint64
+	ToBlock               uint64
+	NextBlock             uint64
+	CurrentBlock          uint64
+	SafeBlock             uint64
+	LogCount              int
+	OrderCreatedCount     int
+	OrderCancelledCount   int
+	OrderMatchedCount     int
+	FloorPriceEventCount  int
+	OrderExpiryEventCount int
+	NoBlocksReady         bool // No safe block to index as one of these two reasons: current block is not far enough ahead or checkpoint is already ahead of the safe block
 }
 
-func New(cfg *config.Config, db *sql.DB, chainClient *chain.Client, floorPrice *store.FloorPriceQueue) (*Service, error) {
+func New(cfg *config.Config, db *sql.DB, chainClient *chain.Client, floorPrice *store.FloorPriceQueue, expiry *store.OrderExpiryQueue) (*Service, error) {
 	events, err := newEventDecoder()
 	if err != nil {
 		return nil, err
@@ -46,6 +48,7 @@ func New(cfg *config.Config, db *sql.DB, chainClient *chain.Client, floorPrice *
 		checkpoint: store.NewCheckpointStore(db),
 		orderbook:  store.NewOrderbookStore(db),
 		floorPrice: floorPrice,
+		expiry:     expiry,
 		events:     events,
 	}, nil
 }
@@ -89,6 +92,7 @@ func (s *Service) SyncNextBatch(ctx context.Context) (*BatchResult, error) {
 	orderCancelledCount := 0
 	orderMatchedCount := 0
 	floorPriceEventCount := 0
+	orderExpiryEventCount := 0
 	for _, log := range logs {
 		if s.events.IsOrderCreated(log) {
 			record, err := s.events.DecodeOrderCreated(log, s.cfg.Chain.ID)
@@ -102,8 +106,15 @@ func (s *Service) SyncNextBatch(ctx context.Context) (*BatchResult, error) {
 			if err := s.enqueueFloorPriceEvent(ctx, record.order.CollectionAddress, "order_created"); err != nil {
 				return nil, fmt.Errorf("enqueue floor price event tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
 			}
+			scheduled, err := s.scheduleOrderExpiry(ctx, record.order)
+			if err != nil {
+				return nil, fmt.Errorf("schedule order expiry tx=%s index=%d: %w", log.TxHash.Hex(), log.Index, err)
+			}
 			orderCreatedCount++
 			floorPriceEventCount++
+			if scheduled {
+				orderExpiryEventCount++
+			}
 			continue
 		}
 
@@ -148,16 +159,17 @@ func (s *Service) SyncNextBatch(ctx context.Context) (*BatchResult, error) {
 	}
 
 	return &BatchResult{
-		FromBlock:            fromBlock,
-		ToBlock:              toBlock,
-		NextBlock:            nextBlock,
-		CurrentBlock:         currentBlock,
-		SafeBlock:            safeBlock,
-		LogCount:             len(logs),
-		OrderCreatedCount:    orderCreatedCount,
-		OrderCancelledCount:  orderCancelledCount,
-		OrderMatchedCount:    orderMatchedCount,
-		FloorPriceEventCount: floorPriceEventCount,
+		FromBlock:             fromBlock,
+		ToBlock:               toBlock,
+		NextBlock:             nextBlock,
+		CurrentBlock:          currentBlock,
+		SafeBlock:             safeBlock,
+		LogCount:              len(logs),
+		OrderCreatedCount:     orderCreatedCount,
+		OrderCancelledCount:   orderCancelledCount,
+		OrderMatchedCount:     orderMatchedCount,
+		FloorPriceEventCount:  floorPriceEventCount,
+		OrderExpiryEventCount: orderExpiryEventCount,
 	}, nil
 }
 
@@ -166,5 +178,17 @@ func (s *Service) enqueueFloorPriceEvent(ctx context.Context, collectionAddress 
 		ChainID:           s.cfg.Chain.ID,
 		CollectionAddress: collectionAddress,
 		Reason:            reason,
+	})
+}
+
+func (s *Service) scheduleOrderExpiry(ctx context.Context, order model.Order) (bool, error) {
+	if order.ExpireTime == 0 {
+		return false, nil
+	}
+
+	return true, s.expiry.Schedule(ctx, model.OrderExpiryEvent{
+		ChainID:    order.ChainID,
+		OrderID:    order.OrderID,
+		ExpireTime: order.ExpireTime,
 	})
 }

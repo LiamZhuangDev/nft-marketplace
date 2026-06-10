@@ -34,16 +34,23 @@ var daemonCmd = &cobra.Command{
 				result.Batch.SafeBlock,
 				result.Batch.CurrentBlock,
 			)
+			fmt.Printf("order expiry events processed: %d orders_expired=%d\n",
+				result.OrderExpiryEventsProcessed,
+				result.OrdersExpired,
+			)
 			fmt.Printf("floor price events processed: %d\n", result.FloorPriceEventsProcessed)
 			return nil
 		}
-		fmt.Printf("fetched logs: from_block=%d to_block=%d count=%d order_created_count=%d order_cancelled_count=%d order_matched_count=%d floor_price_events_enqueued=%d floor_price_events_processed=%d next_checkpoint=%d safe_block=%d\n",
+		fmt.Printf("fetched logs: from_block=%d to_block=%d count=%d order_created_count=%d order_cancelled_count=%d order_matched_count=%d order_expiry_events_scheduled=%d order_expiry_events_processed=%d orders_expired=%d floor_price_events_enqueued=%d floor_price_events_processed=%d next_checkpoint=%d safe_block=%d\n",
 			result.Batch.FromBlock,
 			result.Batch.ToBlock,
 			result.Batch.LogCount,
 			result.Batch.OrderCreatedCount,
 			result.Batch.OrderCancelledCount,
 			result.Batch.OrderMatchedCount,
+			result.Batch.OrderExpiryEventCount,
+			result.OrderExpiryEventsProcessed,
+			result.OrdersExpired,
 			result.Batch.FloorPriceEventCount,
 			result.FloorPriceEventsProcessed,
 			result.Batch.NextBlock,

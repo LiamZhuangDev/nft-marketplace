@@ -57,15 +57,23 @@ flowchart TD
     F --> I
     G --> I
 
+    E --> Q[Redis order expiry schedule]
+
     I -->|RPUSH nft-orderbook-indexer:floor-price-events| L[(Redis)]
     L -->|LPOP pending jobs| M[processFloorPriceEvents]
     M --> N[UpdateCollectionFloorPrice]
     N --> O[(MySQL nft_collections)]
 
+    Q -->|ZADD nft-orderbook-indexer:order-expiries| R[(Redis sorted set)]
+    R -->|ZRANGEBYSCORE due jobs| S[processOrderExpiryEvents]
+    S --> T[ExpireOrder]
+    T --> H
+    T -->|expired listing| I
+
     C --> P[(MySQL indexer_checkpoints)]
 ```
 
-The important rule is: MySQL receives the canonical event write first. Redis only receives a lightweight follow-up message saying "this collection's floor price should be recalculated."
+The important rule is: MySQL receives the canonical event write first. Redis only receives lightweight follow-up messages, such as "this collection's floor price should be recalculated" or "this order should be checked when its expiry time arrives."
 
 Current floor price is recomputed from active listing rows:
 
@@ -103,13 +111,14 @@ FROM indexer_checkpoints;
 
 ## Redis Queues
 
-Redis is not the durable source of truth. In this milestone, it is used as a small queue for derived floor-price work.
+Redis is not the durable source of truth. In these milestones, it is used for derived background work.
 
 Primary keys:
 
 - `nft-orderbook-indexer:floor-price-events`: JSON queue of collections whose floor price should be recalculated.
+- `nft-orderbook-indexer:order-expiries`: sorted set of orders keyed by `expire_time`.
 
-Each queue item has this shape:
+Floor-price queue items have this shape:
 
 ```json
 {
@@ -119,7 +128,17 @@ Each queue item has this shape:
 }
 ```
 
-The daemon writes canonical order/item/activity rows to MySQL first, pushes a queue item to Redis, then drains pending queue items and updates `nft_collections`.
+Order-expiry sorted-set items have this shape:
+
+```json
+{
+  "chain_id": 11155111,
+  "order_id": "0x...",
+  "expire_time": 1730000000
+}
+```
+
+The daemon writes canonical order/item/activity rows to MySQL first, schedules expiring orders in Redis, drains due expiry jobs, then drains pending floor-price jobs and updates `nft_collections`.
 
 ## Prerequisites
 
@@ -316,7 +335,7 @@ eth.BlockNumber(ctx)
 ### Milestone 4: checkpoint loop fetches logs
 [Git Commit](https://github.com/LiamZhuangDev/nft-marketplace/commit/88aadd79f36e0a0f4532a1bf0d07f8354d140e63)
 
-The key indexing idea: `The indexer should read the latest block and index only up to safe block.`
+The key indexing idea: `The indexer should read the last indexed block (checkpoint) from DB and index only up to safe block.`
 ```mermaid
 flowchart TD
     A[Start SyncNextBatch] --> B[Ask RPC for current block]
@@ -381,6 +400,7 @@ mysql -h 127.0.0.1 -P 3306 -u easyuser -peasypasswd easyswap < db/migrations/01_
 ```
 
 ### Milestone 6: OrderCancelled updates DB rows
+[Git Commit](https://github.com/LiamZhuangDev/nft-marketplace/commit/2e434e07b01fddf561e8a1d2ad65742238afc3d2)
 What changed:
 ```text
 1. Added OrderCancelled ABI/topic decode logic in internal/indexer/events.go
@@ -397,6 +417,7 @@ What changed:
 ```
 
 ### Milestone 7: OrderMatched updates DB rows
+[Git Commit](https://github.com/LiamZhuangDev/nft-marketplace/commit/83eac76265f50a4650e7f5f9c832da98815963ee)
 What changed:
 ```text
 1. Added OrderMatched ABI/topic decode logic in internal/indexer/events.go
@@ -414,7 +435,7 @@ What changed:
 ```
 
 ### Milestone 8: Redis event consumer updates floor price
-Github commit: <commit_uri>
+[Git Commit](https://github.com/LiamZhuangDev/nft-marketplace/commit/dfa4b8be0a63d249461e838ece1d94d225d1d782)
 What changed:
 ```text
 1. Added Redis floor-price queue: floorprice_queue.go
@@ -424,6 +445,15 @@ What changed:
 5. Added nft_collections schema to fresh migration and exiting-db migration
 ```
 ### Milestone 9: order expiry worker
+[Git Commit](commit_uri_placeholder)
+What changed:
+```text
+1. Added Redis order-expiry sorted set: order_expiry_queue.go
+2. Indexer schedules an expiry job after OrderCreated when expire_time is nonzero.
+3. App daemon consumes due expiry jobs after each checkpoint batch.
+4. DB store expires only orders that are still active and whose expire_time has passed.
+5. Expired listing orders clear item listing state and enqueue a floor-price refresh.
+```
 ### Milestone 10: README + diagrams + tests
 
 ---
@@ -432,9 +462,8 @@ What changed:
 
 - The indexer polls block ranges instead of subscribing to a websocket stream.
 - It waits for a small chain-specific confirmation buffer before indexing blocks.
-- Sync progress is stored in `ob_indexed_status.last_indexed_block`.
-- If the RPC rejects a large block range, the indexer retries one block at a time.
-- MySQL writes are the canonical indexed state; Redis queues can be rebuilt from DB-backed order state where the order manager supports it.
+- Sync progress is stored in `indexer_checkpoints.last_indexed_block`.
+- MySQL writes are the canonical indexed state; Redis queues only coordinate derived background work.
 - Use a realistic `last_indexed_block`; starting from block `0` can be very slow and may exceed RPC provider limits.
 
 ## Troubleshooting

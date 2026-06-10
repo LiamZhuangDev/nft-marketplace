@@ -308,7 +308,7 @@ func getOrderForUpdate(ctx context.Context, tx *sql.Tx, chainID int64, orderID s
 		&order.LogIndex,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("cancelled order %s not found", orderID)
+		return nil, fmt.Errorf("order %s not found: %w", orderID, sql.ErrNoRows)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("query order %s for update: %w", orderID, err)
@@ -335,6 +335,23 @@ func updateOrderCancelled(ctx context.Context, tx *sql.Tx, event model.OrderCanc
 	)
 	if err != nil {
 		return fmt.Errorf("update order %s cancelled: %w", event.OrderID, err)
+	}
+	return nil
+}
+
+func updateOrderExpired(ctx context.Context, tx *sql.Tx, order model.Order) error {
+	_, err := tx.ExecContext(
+		ctx,
+		`UPDATE nft_orders
+		 SET order_status = ?,
+		     quantity_remaining = 0
+		 WHERE chain_id = ? AND order_id = ?`,
+		"expired",
+		order.ChainID,
+		order.OrderID,
+	)
+	if err != nil {
+		return fmt.Errorf("update order %s expired: %w", order.OrderID, err)
 	}
 	return nil
 }
@@ -420,6 +437,41 @@ func (s *OrderbookStore) UpdateCollectionFloorPrice(ctx context.Context, event m
 		return fmt.Errorf("update collection floor price %s: %w", event.CollectionAddress, err)
 	}
 	return nil
+}
+
+func (s *OrderbookStore) ExpireOrder(ctx context.Context, event model.OrderExpiryEvent, now uint64) (*model.Order, bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	order, err := getOrderForUpdate(ctx, tx, event.ChainID, event.OrderID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+
+	if order.OrderStatus != "active" || order.ExpireTime == 0 || order.ExpireTime > now {
+		return order, false, nil
+	}
+
+	if err := updateOrderExpired(ctx, tx, *order); err != nil {
+		return nil, false, err
+	}
+
+	if order.OrderType == "listing" {
+		if err := clearItemListing(ctx, tx, *order); err != nil {
+			return nil, false, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, false, fmt.Errorf("commit OrderExpired tx: %w", err)
+	}
+	return order, true, nil
 }
 
 func insertActivity(ctx context.Context, tx *sql.Tx, activity model.Activity) error {

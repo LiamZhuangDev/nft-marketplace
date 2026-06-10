@@ -49,6 +49,12 @@ type FloorPriceEvent struct {
 	Reason            string `json:"reason"`
 }
 
+type OrderExpiryEvent struct {
+	ChainID    int64  `json:"chain_id"`
+	OrderID    string `json:"order_id"`
+	ExpireTime uint64 `json:"expire_time"`
+}
+
 type OrderCancelled struct {
 	ChainID     int64
 	OrderID     string
