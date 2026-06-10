@@ -40,11 +40,13 @@ func (q *OrderExpiryQueue) Schedule(ctx context.Context, event model.OrderExpiry
 }
 
 func (q *OrderExpiryQueue) DequeueDue(ctx context.Context, now uint64) (*model.OrderExpiryEvent, bool, error) {
-	items, err := q.redis.ZRangeByScore(ctx, OrderExpiryQueueKey, &redis.ZRangeBy{
-		Min:    "-inf",
-		Max:    fmt.Sprintf("%d", now),
-		Offset: 0,
-		Count:  1,
+	items, err := q.redis.ZRangeArgs(ctx, redis.ZRangeArgs{
+		Key:     OrderExpiryQueueKey,
+		Start:   "-inf",
+		Stop:    fmt.Sprintf("%d", now),
+		ByScore: true,
+		Offset:  0,
+		Count:   1,
 	}).Result()
 	if err != nil {
 		return nil, false, fmt.Errorf("query due order expiry events: %w", err)
