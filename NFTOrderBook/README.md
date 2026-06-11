@@ -3,6 +3,12 @@
 ## Overview
 This reimplements `EasySwapContract` for practice purpose.
 
+In **escrow-first** design, an order is only real after the maker has already locked the required asset:
+- Seller moves NFT into the escrow contract before creating a listing
+- Buyer moves ETH into the escrow contract before making an offer
+
+This design gives stronger guarantees and simpler settlement, but costs more gas, locks assets, and puts more risk in the high-value escrow contract.
+
 ## Rebuild Steps
 - Init a Hardhat v2 project
 ```bash
@@ -76,3 +82,21 @@ test
 cd NFTOrderBook
 npm test
 ```
+
+---
+## Signed-order Settlement Model
+
+Current escrow-first flow:
+```text
+maker creates order on-chain -> asset moves into vault -> taker matches later
+```
+
+Signed-order flow:
+```text
+maker signs order off-chain -> taker submits order + signature on-chain -> contract verifies signature -> settlement happens atomically
+```
+So the maker does not call `createOrder` first. They sign a typed message. The taker pays gas to settle it.
+
+Step1: Adds EIP-712 support
+Step2: Signature verification
+Step3: Settlement

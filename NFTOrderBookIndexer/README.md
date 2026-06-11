@@ -36,6 +36,14 @@ Runtime dependencies:
 - Redis: lightweight queue storage for derived background work.
 - EVM RPC endpoint: used to fetch block numbers and contract logs.
 
+MySQL is the source of truth. Redis is just used for background jobs. 
+
+When the indexer reads blockchain events, it first writes the canonical state to MySQL. After that, it pushes small jobs to Redis.
+
+Redis helps because those jobs do not have to block the main indexing loop. It also gives us a clean place to retry or process derived work separately. 
+
+For order expiry specifically, Redis sorted sets are useful because we can store expire_time as the score and efficiently fetch jobs whose expiry time is due.
+
 ## Data Flow
 
 ```mermaid
@@ -129,7 +137,7 @@ FROM indexer_checkpoints;
 
 ## Redis Queues
 
-Redis is not the durable source of truth. In these milestones, it is used for derived background work.
+Redis is not the durable source of truth. In these milestones, it is used for derived background work like floor-price recalculation and order expiry.
 
 Primary keys:
 
@@ -220,6 +228,12 @@ Edit `config/config.toml` and verify:
 
 ## Run
 
+Go to indexer folder:
+
+```shell
+cd NFTOrderBookIndexer
+```
+
 Run directly:
 
 ```shell
@@ -229,7 +243,7 @@ go run . daemon -c ./config/config.toml
 Run tests:
 
 ```shell
-go test ./...
+go test ./internal/test
 ```
 
 Build only:
@@ -465,7 +479,7 @@ What changed:
 2. Added Mermaid diagrams for the chain-to-DB/Redis path and background workers.
 3. Added dependency-free tests in internal/test for worker loops and fake-chain order events.
 4. Refactored app worker helpers to accept small interfaces, so they can be tested with fakes.
-5. Verified the project with go test ./...
+5. Verified the project with go test ./internal/test
 ```
 
 ---

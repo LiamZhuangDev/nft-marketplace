@@ -39,4 +39,19 @@ library OrderHashing {
             )
         );
     }
+
+    function hashOrderStruct(OrderTypes.Order memory order) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                ORDER_TYPEHASH,
+                order.side,
+                order.saleKind,
+                order.maker,
+                hashAsset(order.nft),
+                order.price,
+                order.expiry,
+                order.salt
+            )
+        );
+    }
 }

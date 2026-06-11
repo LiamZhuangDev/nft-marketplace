@@ -9,16 +9,21 @@ import {IOrderBook} from "./interfaces/IOrderBook.sol";
 import {OrderStorage} from "./OrderStorage.sol";
 import {OrderState} from "./OrderState.sol";
 import {ProtocolFeeManager} from "./ProtocolFeeManager.sol";
+import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 
-contract OrderBook is IOrderBook, OrderStorage, OrderState, ProtocolFeeManager {
+contract OrderBook is IOrderBook, OrderStorage, OrderState, ProtocolFeeManager, EIP712 {
     address public nftEscrowVault;
     address public protocolFeeRecipient;
     
-    constructor(address _nftEscrowVault, address _protocolFeeRecipient) {
+    constructor(address _nftEscrowVault, address _protocolFeeRecipient) EIP712("NFTOrderBook", "1") {
         require(_nftEscrowVault != address(0), "NFTEscrowVault: zero address");
         require(_protocolFeeRecipient != address(0), "ProtocolFeeRecipient: zero address");
         nftEscrowVault = _nftEscrowVault;
         protocolFeeRecipient = _protocolFeeRecipient;
+    }
+
+    function hashTypedOrder(OrderTypes.Order memory order) external view returns (bytes32) {
+        return _hashTypedDataV4(OrderHashing.hashOrderStruct(order));
     }
 
     function createOrder(OrderTypes.Order memory order) external payable {
