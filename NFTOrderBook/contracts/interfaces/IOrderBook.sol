@@ -44,6 +44,12 @@ interface IOrderBook {
         bytes calldata listingSignature
     ) external payable;
 
+    function matchSignedOffer(
+        OrderTypes.Order calldata listing,
+        OrderTypes.Order calldata offer,
+        bytes calldata offerSignature
+    ) external;
+
     function cancelSignedOrder(OrderTypes.Order calldata order) external;
 
     function incrementUserNonce() external;

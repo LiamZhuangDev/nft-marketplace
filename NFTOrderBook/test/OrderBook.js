@@ -19,8 +19,12 @@ describe("OrderBook", function () {
     const vault = await Vault.deploy();
     await vault.waitForDeployment();
 
+    const TestERC20 = await ethers.getContractFactory("TestERC20");
+    const weth = await TestERC20.deploy();
+    await weth.waitForDeployment();
+
     const OrderBook = await ethers.getContractFactory("OrderBook");
-    const orderBook = await OrderBook.deploy(vault.target, feeRecipient.address);
+    const orderBook = await OrderBook.deploy(vault.target, feeRecipient.address, weth.target);
     await orderBook.waitForDeployment();
 
     await vault.setOrderBook(orderBook.target);
@@ -32,10 +36,12 @@ describe("OrderBook", function () {
     await nft.mint(seller.address, 1);
     await nft.mint(seller.address, 2);
     await nft.connect(seller).setApprovalForAll(vault.target, true);
+    await weth.mint(buyer.address, ethers.parseEther("10"));
+    await weth.connect(buyer).approve(orderBook.target, ethers.MaxUint256);
 
     await orderBook.setProtocolFeeBps(250);
 
-    return { deployer, seller, buyer, feeRecipient, vault, orderBook, nft };
+    return { deployer, seller, buyer, feeRecipient, vault, orderBook, nft, weth };
   }
 
   function listing({ seller, nft, tokenId, price, salt, userNonce = 0 }) {
@@ -140,6 +146,40 @@ describe("OrderBook", function () {
     expect(await nft.ownerOf(1)).to.equal(buyer.address);
     expect(await nft.ownerOf(2)).to.equal(seller.address);
     expect(await ethers.provider.getBalance(vault.target)).to.equal(0);
+  });
+
+  it("lets a seller accept a signed ERC20 buyer offer", async function () {
+    const { seller, buyer, feeRecipient, orderBook, nft, weth } = await loadFixture(deployFixture);
+    const price = ethers.parseEther("1");
+    const sellIntent = listing({ seller, nft, tokenId: 1, price, salt: 12 });
+    const buyOffer = offer({ buyer, nft, tokenId: 1, price, salt: 13 });
+    const domain = await signingDomain(orderBook);
+    const buyerSignature = await buyer.signTypedData(domain, orderTypes, buyOffer);
+    const protocolFee = (price * 250n) / 10_000n;
+    const sellerAmount = price - protocolFee;
+
+    await expect(
+      orderBook.connect(seller).matchSignedOffer(sellIntent, buyOffer, buyerSignature)
+    ).to.changeTokenBalances(
+      weth,
+      [buyer, seller, feeRecipient],
+      [-price, sellerAmount, protocolFee]
+    );
+
+    expect(await nft.ownerOf(1)).to.equal(buyer.address);
+  });
+
+  it("rejects a signed ERC20 offer with the wrong signer", async function () {
+    const { seller, buyer, orderBook, nft } = await loadFixture(deployFixture);
+    const price = ethers.parseEther("1");
+    const sellIntent = listing({ seller, nft, tokenId: 1, price, salt: 14 });
+    const buyOffer = offer({ buyer, nft, tokenId: 1, price, salt: 15 });
+    const domain = await signingDomain(orderBook);
+    const sellerSignature = await seller.signTypedData(domain, orderTypes, buyOffer);
+
+    await expect(
+      orderBook.connect(seller).matchSignedOffer(sellIntent, buyOffer, sellerSignature)
+    ).to.be.revertedWith("invalid offer signature");
   });
 
   it("rejects a signed listing with the wrong signer", async function () {

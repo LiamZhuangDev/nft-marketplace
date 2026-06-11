@@ -11,16 +11,23 @@ import {OrderState} from "./OrderState.sol";
 import {ProtocolFeeManager} from "./ProtocolFeeManager.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract OrderBook is IOrderBook, OrderStorage, OrderState, ProtocolFeeManager, EIP712 {
+    using SafeERC20 for IERC20;
+
     address public nftEscrowVault;
     address public protocolFeeRecipient;
+    address public erc20PaymentToken;
     
-    constructor(address _nftEscrowVault, address _protocolFeeRecipient) EIP712("NFTOrderBook", "1") {
+    constructor(address _nftEscrowVault, address _protocolFeeRecipient, address _erc20PaymentToken) EIP712("NFTOrderBook", "1") {
         require(_nftEscrowVault != address(0), "NFTEscrowVault: zero address");
         require(_protocolFeeRecipient != address(0), "ProtocolFeeRecipient: zero address");
+        require(_erc20PaymentToken != address(0), "ERC20PaymentToken: zero address");
         nftEscrowVault = _nftEscrowVault;
         protocolFeeRecipient = _protocolFeeRecipient;
+        erc20PaymentToken = _erc20PaymentToken;
     }
 
     function hashTypedOrder(OrderTypes.Order memory order) external view returns (bytes32) {
@@ -157,6 +164,51 @@ contract OrderBook is IOrderBook, OrderStorage, OrderState, ProtocolFeeManager, 
         }
 
         emit OrderMatched(listingKey, offerKey, msg.sender, listing, offer, listing.price);
+    }
+
+    function matchSignedOffer(
+        OrderTypes.Order calldata listing,
+        OrderTypes.Order calldata offer,
+        bytes calldata offerSignature
+    ) external {
+        OrderValidator._validateOrder(listing, false);
+        OrderValidator._validateOrder(offer, false);
+
+        require(listing.side == OrderTypes.Side.List, "listing must be list side");
+        require(offer.side == OrderTypes.Side.Offer, "offer must be offer side");
+        require(listing.maker == msg.sender, "listing maker must be sender");
+        require(listing.nft.collection == offer.nft.collection, "collection mismatch");
+        require(offer.price >= listing.price, "offer price too low");
+        require(recoverOrderSigner(offer, offerSignature) == offer.maker, "invalid offer signature");
+        _validateUserNonce(offer);
+
+        if (offer.saleKind == OrderTypes.SaleKind.FixedPriceForItem) {
+            require(listing.nft.tokenId == offer.nft.tokenId, "tokenId mismatch");
+        }
+
+        OrderKey listingKey = OrderHashing.hashOrder(listing);
+        OrderKey offerKey = OrderHashing.hashOrder(offer);
+
+        require(!_isCancelled(offerKey), "offer cancelled");
+        require(_getFilledAmount(offerKey) == 0, "offer already filled");
+
+        _updateFilledAmount(offerKey, listing.nft.amount);
+
+        (uint256 sellerAmount, uint256 protocolFee) = _splitPayment(offer.price);
+        IERC20 token = IERC20(erc20PaymentToken);
+        token.safeTransferFrom(offer.maker, listing.maker, sellerAmount);
+        if (protocolFee > 0) {
+            token.safeTransferFrom(offer.maker, protocolFeeRecipient, protocolFee);
+        }
+
+        INFTEscrowVault(nftEscrowVault).transferNFT(
+            listing.maker,
+            offer.maker,
+            listing.nft.collection,
+            listing.nft.tokenId
+        );
+
+        emit OrderMatched(listingKey, offerKey, msg.sender, listing, offer, offer.price);
     }
 
     // @dev Buyer accepts listing: listing must exist and not cancelled; offer must NOT exist, buyer sends fresh ETH equal or above listing price

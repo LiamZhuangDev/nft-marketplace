@@ -5,6 +5,11 @@ async function main() {
 
   console.log("Deploying with account:", deployer.address);
 
+  const wethAddress = process.env.WETH_ADDRESS;
+  if (!wethAddress) {
+    throw new Error("WETH_ADDRESS env var is required");
+  }
+
   const NFTEscrowVault = await hre.ethers.getContractFactory("NFTEscrowVault");
   const vault = await NFTEscrowVault.deploy();
   await vault.waitForDeployment();
@@ -13,11 +18,12 @@ async function main() {
   console.log("NFTEscrowVault deployed to:", vaultAddress);
 
   const OrderBook = await hre.ethers.getContractFactory("OrderBook");
-  const orderBook = await OrderBook.deploy(vaultAddress, deployer.address);
+  const orderBook = await OrderBook.deploy(vaultAddress, deployer.address, wethAddress);
   await orderBook.waitForDeployment();
   const orderBookAddress = await orderBook.getAddress();
 
   console.log("OrderBook deployed to:", orderBookAddress);
+  console.log("ERC20 payment token:", wethAddress);
 
   const tx = await vault.setOrderBook(orderBookAddress);
   await tx.wait();
