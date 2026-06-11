@@ -25,11 +25,12 @@ library OrderTypes {
         uint256 tokenId;
     }
 
-    // @dev Immutable Order identity: (maker, side, saleKind, nft, price, expiry, salt)
+    // @dev Immutable Order identity: (maker, userNonce, side, saleKind, nft, price, expiry, salt)
     struct Order {
         Side side;
         SaleKind saleKind;
         address maker;
+        uint256 userNonce;
         Asset nft;
         uint128 price; // unit price of nft
         uint64 expiry;

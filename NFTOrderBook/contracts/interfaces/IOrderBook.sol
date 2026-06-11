@@ -17,6 +17,8 @@ interface IOrderBook {
 
     event OrderCancelled(OrderKey indexed orderKey, address indexed maker);
 
+    event UserNonceIncremented(address indexed user, uint256 newNonce);
+
     event OrderMatched(
         OrderKey indexed listingOrderKey,
         OrderKey indexed offerOrderKey,
@@ -43,6 +45,8 @@ interface IOrderBook {
     ) external payable;
 
     function cancelSignedOrder(OrderTypes.Order calldata order) external;
+
+    function incrementUserNonce() external;
 
     function cancelOrder(OrderKey orderKey) external;
 }

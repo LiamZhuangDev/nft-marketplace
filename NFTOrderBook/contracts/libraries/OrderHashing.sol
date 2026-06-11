@@ -9,7 +9,7 @@ library OrderHashing {
     );
 
     bytes32 public constant ORDER_TYPEHASH = keccak256(
-        "Order(uint8 side,uint8 saleKind,address maker,Asset nft,uint128 price,uint64 expiry,uint64 salt)Asset(uint256 tokenId,address collection,uint96 amount)"
+        "Order(uint8 side,uint8 saleKind,address maker,uint256 userNonce,Asset nft,uint128 price,uint64 expiry,uint64 salt)Asset(uint256 tokenId,address collection,uint96 amount)"
     );
 
     function hashAsset(OrderTypes.Asset memory asset) internal pure returns (bytes32) {
@@ -31,6 +31,7 @@ library OrderHashing {
                     order.side,
                     order.saleKind,
                     order.maker,
+                    order.userNonce,
                     hashAsset(order.nft),
                     order.price,
                     order.expiry,
@@ -47,6 +48,7 @@ library OrderHashing {
                 order.side,
                 order.saleKind,
                 order.maker,
+                order.userNonce,
                 hashAsset(order.nft),
                 order.price,
                 order.expiry,

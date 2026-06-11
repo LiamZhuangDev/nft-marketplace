@@ -38,11 +38,12 @@ describe("OrderBook", function () {
     return { deployer, seller, buyer, feeRecipient, vault, orderBook, nft };
   }
 
-  function listing({ seller, nft, tokenId, price, salt }) {
+  function listing({ seller, nft, tokenId, price, salt, userNonce = 0 }) {
     return {
       side: Side.List,
       saleKind: SaleKind.FixedPriceForItem,
       maker: seller.address,
+      userNonce,
       nft: {
         tokenId,
         collection: nft.target,
@@ -54,11 +55,12 @@ describe("OrderBook", function () {
     };
   }
 
-  function offer({ buyer, nft, tokenId, price, salt }) {
+  function offer({ buyer, nft, tokenId, price, salt, userNonce = 0 }) {
     return {
       side: Side.Offer,
       saleKind: SaleKind.FixedPriceForItem,
       maker: buyer.address,
+      userNonce,
       nft: {
         tokenId,
         collection: nft.target,
@@ -91,6 +93,7 @@ describe("OrderBook", function () {
       { name: "side", type: "uint8" },
       { name: "saleKind", type: "uint8" },
       { name: "maker", type: "address" },
+      { name: "userNonce", type: "uint256" },
       { name: "nft", type: "Asset" },
       { name: "price", type: "uint128" },
       { name: "expiry", type: "uint64" },
@@ -169,10 +172,42 @@ describe("OrderBook", function () {
     ).to.be.revertedWith("listing cancelled");
   });
 
+  it("lets the maker bulk-cancel old signed listings by incrementing userNonce", async function () {
+    const { seller, buyer, feeRecipient, orderBook, nft } = await loadFixture(deployFixture);
+    const price = ethers.parseEther("1");
+    const oldListing = listing({ seller, nft, tokenId: 1, price, salt: 18, userNonce: 0 });
+    const oldBuyIntent = offer({ buyer, nft, tokenId: 1, price, salt: 19 });
+    const domain = await signingDomain(orderBook);
+    const oldSignature = await seller.signTypedData(domain, orderTypes, oldListing);
+
+    await expect(orderBook.connect(seller).incrementUserNonce())
+      .to.emit(orderBook, "UserNonceIncremented")
+      .withArgs(seller.address, 1);
+
+    await expect(
+      orderBook.connect(buyer).matchSignedListing(oldListing, oldBuyIntent, oldSignature, { value: price })
+    ).to.be.revertedWith("invalid user nonce");
+
+    const newListing = listing({ seller, nft, tokenId: 1, price, salt: 20, userNonce: 1 });
+    const newBuyIntent = offer({ buyer, nft, tokenId: 1, price, salt: 21 });
+    const newSignature = await seller.signTypedData(domain, orderTypes, newListing);
+    const protocolFee = (price * 250n) / 10_000n;
+    const sellerAmount = price - protocolFee;
+
+    await expect(
+      orderBook.connect(buyer).matchSignedListing(newListing, newBuyIntent, newSignature, { value: price })
+    ).to.changeEtherBalances(
+      [seller, feeRecipient],
+      [sellerAmount, protocolFee]
+    );
+
+    expect(await nft.ownerOf(1)).to.equal(buyer.address);
+  });
+
   it("requires stored escrow orders to use cancelOrder", async function () {
     const { seller, orderBook, nft } = await loadFixture(deployFixture);
     const price = ethers.parseEther("1");
-    const sellOrder = listing({ seller, nft, tokenId: 1, price, salt: 18 });
+    const sellOrder = listing({ seller, nft, tokenId: 1, price, salt: 22 });
 
     await orderBook.connect(seller).createOrder(sellOrder);
 

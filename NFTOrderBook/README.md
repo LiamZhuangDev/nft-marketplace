@@ -114,9 +114,9 @@ On-chain:
 
 ### Implementation
 
-- Step1: Adds EIP-712 support
-- Step2: Signature verification, seller signs this exact Order object off-chain and contract verifies the signature.
-- Step3: Settlement where the buyer submits the seller’s signed listing, sends ETH, and the contract verifies the signature before transferring the NFT.
+- Step 1: Adds EIP-712 support
+- Step 2: Signature verification, seller signs this exact Order object off-chain and contract verifies the signature.
+- Step 3: Settlement where the buyer submits the seller’s signed listing, sends ETH, and the contract verifies the signature before transferring the NFT.
 ```mermaid
 sequenceDiagram
     actor Seller
@@ -150,3 +150,4 @@ sequenceDiagram
 
     OrderBook->>OrderBook: Emit OrderMatched
 ```
+- Step 4: cancel signed order (single or batch).

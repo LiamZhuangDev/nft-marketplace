@@ -128,6 +128,7 @@ contract OrderBook is IOrderBook, OrderStorage, OrderState, ProtocolFeeManager, 
         require(listing.nft.tokenId == offer.nft.tokenId, "tokenId mismatch");
         require(offer.price >= listing.price, "offer price too low");
         require(recoverOrderSigner(listing, listingSignature) == listing.maker, "invalid listing signature");
+        _validateUserNonce(listing);
 
         OrderKey listingKey = OrderHashing.hashOrder(listing);
         OrderKey offerKey = OrderHashing.hashOrder(offer);
@@ -250,9 +251,14 @@ contract OrderBook is IOrderBook, OrderStorage, OrderState, ProtocolFeeManager, 
         sellerAmount = price - protocolFee;
     }
 
+    function _validateUserNonce(OrderTypes.Order calldata order) internal view {
+        require(order.userNonce == userNonce[order.maker], "invalid user nonce");
+    }
+
     function cancelSignedOrder(OrderTypes.Order calldata order) external {
         require(msg.sender == order.maker, "only maker can cancel");
         OrderValidator._validateOrder(order, true);
+        _validateUserNonce(order);
 
         OrderKey orderKey = OrderHashing.hashOrder(order);
         require(orders[orderKey].maker == address(0), "use cancelOrder for stored order");
@@ -261,6 +267,11 @@ contract OrderBook is IOrderBook, OrderStorage, OrderState, ProtocolFeeManager, 
         _cancelOrder(orderKey);
 
         emit OrderCancelled(orderKey, order.maker);
+    }
+
+    function incrementUserNonce() external {
+        uint256 newNonce = _incrementUserNonce(msg.sender);
+        emit UserNonceIncremented(msg.sender, newNonce);
     }
 
     function cancelOrder(OrderKey orderKey) external {
