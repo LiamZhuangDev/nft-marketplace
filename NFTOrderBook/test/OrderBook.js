@@ -152,6 +152,35 @@ describe("OrderBook", function () {
     ).to.be.revertedWith("invalid listing signature");
   });
 
+  it("lets the maker cancel a signed listing before it is matched", async function () {
+    const { seller, buyer, orderBook, nft } = await loadFixture(deployFixture);
+    const price = ethers.parseEther("1");
+    const sellOrder = listing({ seller, nft, tokenId: 1, price, salt: 16 });
+    const buyIntent = offer({ buyer, nft, tokenId: 1, price, salt: 17 });
+    const domain = await signingDomain(orderBook);
+    const sellerSignature = await seller.signTypedData(domain, orderTypes, sellOrder);
+
+    await expect(orderBook.connect(buyer).cancelSignedOrder(sellOrder)).to.be.revertedWith("only maker can cancel");
+
+    await orderBook.connect(seller).cancelSignedOrder(sellOrder);
+
+    await expect(
+      orderBook.connect(buyer).matchSignedListing(sellOrder, buyIntent, sellerSignature, { value: price })
+    ).to.be.revertedWith("listing cancelled");
+  });
+
+  it("requires stored escrow orders to use cancelOrder", async function () {
+    const { seller, orderBook, nft } = await loadFixture(deployFixture);
+    const price = ethers.parseEther("1");
+    const sellOrder = listing({ seller, nft, tokenId: 1, price, salt: 18 });
+
+    await orderBook.connect(seller).createOrder(sellOrder);
+
+    await expect(orderBook.connect(seller).cancelSignedOrder(sellOrder)).to.be.revertedWith(
+      "use cancelOrder for stored order"
+    );
+  });
+
   it("lets a buyer accept an existing listing with fresh ETH", async function () {
     const { seller, buyer, feeRecipient, orderBook, nft, vault } = await loadFixture(deployFixture);
     const price = ethers.parseEther("1");

@@ -250,6 +250,19 @@ contract OrderBook is IOrderBook, OrderStorage, OrderState, ProtocolFeeManager, 
         sellerAmount = price - protocolFee;
     }
 
+    function cancelSignedOrder(OrderTypes.Order calldata order) external {
+        require(msg.sender == order.maker, "only maker can cancel");
+        OrderValidator._validateOrder(order, true);
+
+        OrderKey orderKey = OrderHashing.hashOrder(order);
+        require(orders[orderKey].maker == address(0), "use cancelOrder for stored order");
+        require(_getFilledAmount(orderKey) == 0, "order already filled");
+
+        _cancelOrder(orderKey);
+
+        emit OrderCancelled(orderKey, order.maker);
+    }
+
     function cancelOrder(OrderKey orderKey) external {
         // load order from storage
         OrderTypes.Order memory order = orders[orderKey];

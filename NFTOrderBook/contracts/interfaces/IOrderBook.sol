@@ -42,5 +42,7 @@ interface IOrderBook {
         bytes calldata listingSignature
     ) external payable;
 
+    function cancelSignedOrder(OrderTypes.Order calldata order) external;
+
     function cancelOrder(OrderKey orderKey) external;
 }

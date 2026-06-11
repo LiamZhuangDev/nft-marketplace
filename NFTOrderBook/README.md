@@ -86,6 +86,8 @@ npm test
 ---
 ## Signed-order Settlement Model
 
+### Overview
+
 Current escrow-first flow:
 ```text
 maker creates order on-chain -> asset moves into vault -> taker matches later
@@ -97,9 +99,24 @@ maker signs order off-chain -> taker submits order + signature on-chain -> contr
 ```
 So the maker does not call `createOrder` first. They sign a typed message. The taker pays gas to settle it.
 
-Step1: Adds EIP-712 support
-Step2: Signature verification, seller signs this exact Order object off-chain and contract verifies the signature.
-Step3: Settlement where the buyer submits the seller’s signed listing, sends ETH, and the contract verifies the signature before transferring the NFT.
+For signed orders, the architecture becomes:
+```text
+Off-chain:
+- Store/display full order data in frontend, backend, indexer, database, or order relay
+- Maker signs order data
+
+On-chain:
+- Verify signature
+- Check filledAmount[orderKey]
+- Set filledAmount when filled/cancelled
+- Transfer assets
+```
+
+### Implementation
+
+- Step1: Adds EIP-712 support
+- Step2: Signature verification, seller signs this exact Order object off-chain and contract verifies the signature.
+- Step3: Settlement where the buyer submits the seller’s signed listing, sends ETH, and the contract verifies the signature before transferring the NFT.
 ```mermaid
 sequenceDiagram
     actor Seller
