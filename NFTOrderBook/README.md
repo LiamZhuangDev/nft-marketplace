@@ -3,11 +3,17 @@
 ## Overview
 This reimplements `EasySwapContract` for practice purpose.
 
-In **escrow-first** design, an order is only real after the maker has already locked the required asset:
+In my marketplace, I started with an **escrow-first** design, where listings and offers are created on-chain and assets are locked in a vault:
 - Seller moves NFT into the escrow contract before creating a listing
 - Buyer moves ETH into the escrow contract before making an offer
 
 This design gives stronger guarantees and simpler settlement, but costs more gas, locks assets, and puts more risk in the high-value escrow contract.
+
+Then I added a **signed-order settlement** flow using EIP-712 and ECDSA.
+
+The idea is that the maker does not need to submit every order on-chain. Instead, they sign a structured order message off-chain. For example, a seller can sign a listing, or a buyer can sign an ERC20/WETH offer. That signed order can be stored by the frontend, backend, or indexer.
+
+When someone wants to fill the order, they submit the order data plus the signature to the contract. The contract rebuilds the EIP-712 hash, uses ECDSA recovery to check that the signature really came from order.maker, then settles the trade atomically.
 
 ## Rebuild Steps
 - Init a Hardhat v2 project
@@ -114,7 +120,7 @@ On-chain:
 
 ### Implementation
 
-- Step 1: Adds EIP-712 support
+- Step 1: Adds EIP-712(ECDSA) support
 - Step 2: Signature verification, seller signs this exact Order object off-chain and contract verifies the signature.
 - Step 3: Settlement where the buyer submits the seller’s signed listing, sends ETH, and the contract verifies the signature before transferring the NFT.
 ```mermaid
