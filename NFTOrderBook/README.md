@@ -98,5 +98,5 @@ maker signs order off-chain -> taker submits order + signature on-chain -> contr
 So the maker does not call `createOrder` first. They sign a typed message. The taker pays gas to settle it.
 
 Step1: Adds EIP-712 support
-Step2: Signature verification
-Step3: Settlement
+Step2: Signature verification, seller signs this exact Order object off-chain and contract verifies the signature.
+Step3: Settlement where the buyer submits the seller’s signed listing, sends ETH, and the contract verifies the signature before transferring the NFT/payment.

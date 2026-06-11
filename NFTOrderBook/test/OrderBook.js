@@ -70,6 +70,50 @@ describe("OrderBook", function () {
     };
   }
 
+  async function signingDomain(orderBook) {
+    const { chainId } = await ethers.provider.getNetwork();
+
+    return {
+      name: "NFTOrderBook",
+      version: "1",
+      chainId,
+      verifyingContract: orderBook.target,
+    };
+  }
+
+  const orderTypes = {
+    Asset: [
+      { name: "tokenId", type: "uint256" },
+      { name: "collection", type: "address" },
+      { name: "amount", type: "uint96" },
+    ],
+    Order: [
+      { name: "side", type: "uint8" },
+      { name: "saleKind", type: "uint8" },
+      { name: "maker", type: "address" },
+      { name: "nft", type: "Asset" },
+      { name: "price", type: "uint128" },
+      { name: "expiry", type: "uint64" },
+      { name: "salt", type: "uint64" },
+    ],
+  };
+
+  it("recovers the maker from a signed order", async function () {
+    const { seller, buyer, orderBook, nft } = await loadFixture(deployFixture);
+    const price = ethers.parseEther("1");
+    const sellOrder = listing({ seller, nft, tokenId: 1, price, salt: 11 });
+    const domain = await signingDomain(orderBook);
+
+    // `signTypedData` is the wallet-side function that signs an EIP-712 typed message.
+    // It means seller signs this exact Order object off-chain.
+    const sellerSignature = await seller.signTypedData(domain, orderTypes, sellOrder);
+    const buyerSignature = await buyer.signTypedData(domain, orderTypes, sellOrder);
+
+    expect(await orderBook.recoverOrderSigner(sellOrder, sellerSignature)).to.equal(seller.address);
+    expect(await orderBook.verifyOrderSignature(sellOrder, sellerSignature)).to.equal(true);
+    expect(await orderBook.verifyOrderSignature(sellOrder, buyerSignature)).to.equal(false);
+  });
+
   it("lets a buyer accept an existing listing with fresh ETH", async function () {
     const { seller, buyer, feeRecipient, orderBook, nft, vault } = await loadFixture(deployFixture);
     const price = ethers.parseEther("1");

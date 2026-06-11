@@ -28,6 +28,12 @@ interface IOrderBook {
 
     function createOrder(OrderTypes.Order memory order) external payable;
 
+    function hashTypedOrder(OrderTypes.Order memory order) external view returns (bytes32);
+
+    function recoverOrderSigner(OrderTypes.Order memory order, bytes memory signature) external view returns (address);
+
+    function verifyOrderSignature(OrderTypes.Order memory order, bytes memory signature) external view returns (bool);
+
     function matchOrder(OrderTypes.Order calldata listing, OrderTypes.Order calldata offer) external payable;
 
     function cancelOrder(OrderKey orderKey) external;

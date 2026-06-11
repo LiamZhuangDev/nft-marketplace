@@ -10,6 +10,7 @@ import {OrderStorage} from "./OrderStorage.sol";
 import {OrderState} from "./OrderState.sol";
 import {ProtocolFeeManager} from "./ProtocolFeeManager.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 contract OrderBook is IOrderBook, OrderStorage, OrderState, ProtocolFeeManager, EIP712 {
     address public nftEscrowVault;
@@ -24,6 +25,14 @@ contract OrderBook is IOrderBook, OrderStorage, OrderState, ProtocolFeeManager, 
 
     function hashTypedOrder(OrderTypes.Order memory order) external view returns (bytes32) {
         return _hashTypedDataV4(OrderHashing.hashOrderStruct(order));
+    }
+
+    function recoverOrderSigner(OrderTypes.Order memory order, bytes memory signature) public view returns (address) {
+        return ECDSA.recover(_hashTypedDataV4(OrderHashing.hashOrderStruct(order)), signature);
+    }
+
+    function verifyOrderSignature(OrderTypes.Order memory order, bytes memory signature) external view returns (bool) {
+        return recoverOrderSigner(order, signature) == order.maker;
     }
 
     function createOrder(OrderTypes.Order memory order) external payable {
