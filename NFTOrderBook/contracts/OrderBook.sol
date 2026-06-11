@@ -113,6 +113,51 @@ contract OrderBook is IOrderBook, OrderStorage, OrderState, ProtocolFeeManager, 
         emit OrderMatched(listingKey, offerKey, msg.sender, listing, offer, fillPrice);
     }
 
+    function matchSignedListing(
+        OrderTypes.Order calldata listing,
+        OrderTypes.Order calldata offer,
+        bytes calldata listingSignature
+    ) external payable {
+        OrderValidator._validateOrder(listing, false);
+        OrderValidator._validateOrder(offer, false);
+
+        require(listing.side == OrderTypes.Side.List, "listing must be list side");
+        require(offer.side == OrderTypes.Side.Offer, "offer must be offer side");
+        require(offer.maker == msg.sender, "offer maker must be sender");
+        require(listing.nft.collection == offer.nft.collection, "collection mismatch");
+        require(listing.nft.tokenId == offer.nft.tokenId, "tokenId mismatch");
+        require(offer.price >= listing.price, "offer price too low");
+        require(recoverOrderSigner(listing, listingSignature) == listing.maker, "invalid listing signature");
+
+        OrderKey listingKey = OrderHashing.hashOrder(listing);
+        OrderKey offerKey = OrderHashing.hashOrder(offer);
+
+        require(!_isCancelled(listingKey), "listing cancelled");
+        require(_getFilledAmount(listingKey) == 0, "listing already filled");
+        require(msg.value >= listing.price, "insufficient ETH sent");
+
+        _updateFilledAmount(listingKey, listing.nft.amount);
+
+        (uint256 sellerAmount, uint256 protocolFee) = _splitPayment(listing.price);
+        payable(listing.maker).transfer(sellerAmount);
+        if (protocolFee > 0) {
+            payable(protocolFeeRecipient).transfer(protocolFee);
+        }
+
+        INFTEscrowVault(nftEscrowVault).transferNFT(
+            listing.maker,
+            offer.maker,
+            listing.nft.collection,
+            listing.nft.tokenId
+        );
+
+        if (msg.value > listing.price) {
+            payable(offer.maker).transfer(msg.value - listing.price);
+        }
+
+        emit OrderMatched(listingKey, offerKey, msg.sender, listing, offer, listing.price);
+    }
+
     // @dev Buyer accepts listing: listing must exist and not cancelled; offer must NOT exist, buyer sends fresh ETH equal or above listing price
     function _buyerAcceptsListing(
         OrderTypes.Order calldata listing,

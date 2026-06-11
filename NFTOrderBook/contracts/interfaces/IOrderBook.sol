@@ -36,5 +36,11 @@ interface IOrderBook {
 
     function matchOrder(OrderTypes.Order calldata listing, OrderTypes.Order calldata offer) external payable;
 
+    function matchSignedListing(
+        OrderTypes.Order calldata listing,
+        OrderTypes.Order calldata offer,
+        bytes calldata listingSignature
+    ) external payable;
+
     function cancelOrder(OrderKey orderKey) external;
 }

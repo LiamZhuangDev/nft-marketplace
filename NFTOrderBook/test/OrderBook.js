@@ -114,6 +114,44 @@ describe("OrderBook", function () {
     expect(await orderBook.verifyOrderSignature(sellOrder, buyerSignature)).to.equal(false);
   });
 
+  it("lets a buyer accept a signed listing without pre-escrow", async function () {
+    const { seller, buyer, feeRecipient, orderBook, nft, vault } = await loadFixture(deployFixture);
+    const price = ethers.parseEther("1");
+    const sellOrder = listing({ seller, nft, tokenId: 1, price, salt: 12 });
+    const buyIntent = offer({ buyer, nft, tokenId: 1, price, salt: 13 });
+    const domain = await signingDomain(orderBook);
+    const sellerSignature = await seller.signTypedData(domain, orderTypes, sellOrder);
+
+    expect(await nft.ownerOf(1)).to.equal(seller.address);
+
+    const protocolFee = (price * 250n) / 10_000n;
+    const sellerAmount = price - protocolFee;
+
+    await expect(
+      orderBook.connect(buyer).matchSignedListing(sellOrder, buyIntent, sellerSignature, { value: price })
+    ).to.changeEtherBalances(
+      [seller, feeRecipient],
+      [sellerAmount, protocolFee]
+    );
+
+    expect(await nft.ownerOf(1)).to.equal(buyer.address);
+    expect(await nft.ownerOf(2)).to.equal(seller.address);
+    expect(await ethers.provider.getBalance(vault.target)).to.equal(0);
+  });
+
+  it("rejects a signed listing with the wrong signer", async function () {
+    const { seller, buyer, orderBook, nft } = await loadFixture(deployFixture);
+    const price = ethers.parseEther("1");
+    const sellOrder = listing({ seller, nft, tokenId: 1, price, salt: 14 });
+    const buyIntent = offer({ buyer, nft, tokenId: 1, price, salt: 15 });
+    const domain = await signingDomain(orderBook);
+    const buyerSignature = await buyer.signTypedData(domain, orderTypes, sellOrder);
+
+    await expect(
+      orderBook.connect(buyer).matchSignedListing(sellOrder, buyIntent, buyerSignature, { value: price })
+    ).to.be.revertedWith("invalid listing signature");
+  });
+
   it("lets a buyer accept an existing listing with fresh ETH", async function () {
     const { seller, buyer, feeRecipient, orderBook, nft, vault } = await loadFixture(deployFixture);
     const price = ethers.parseEther("1");
