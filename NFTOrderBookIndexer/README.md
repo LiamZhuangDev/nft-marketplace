@@ -135,6 +135,93 @@ SELECT chain_id, indexer_name, last_indexed_block
 FROM indexer_checkpoints;
 ```
 
+Entity Relationships:
+- One `nft_collections` row can be related to many `nft_items` rows. They are matched by `chain_id` and `collection_address` columns.
+- One `nft_items` row can be related to many `nft_orders` rows. They are matched by `chain_id`, `collection_address` and `token_id` columns.
+- One `nft_orders` row can be related to many `nft_activities` rows. They are matched by `order_id`/`counter_order_id`.
+
+```mermaid
+erDiagram
+    indexer_checkpoints {
+        bigint id PK
+        bigint chain_id
+        varchar indexer_name
+        bigint last_indexed_block
+    }
+
+    nft_collections {
+        bigint id PK
+        bigint chain_id
+        varchar collection_address
+        decimal floor_price
+        bigint active_listing_count
+    }
+
+    nft_items {
+        bigint id PK
+        bigint chain_id
+        varchar collection_address
+        varchar token_id
+        varchar owner
+        bigint supply
+        decimal list_price
+        bigint list_time
+    }
+
+    nft_orders {
+        bigint id PK
+        bigint chain_id
+        varchar order_id UK
+        varchar order_status
+        varchar order_type
+        varchar collection_address
+        varchar token_id
+        varchar maker
+        decimal price
+        bigint quantity_remaining
+        bigint size
+        bigint expire_time
+        bigint salt
+        bigint block_number
+        varchar tx_hash
+        bigint log_index
+    }
+
+    nft_activities {
+        bigint id PK
+        bigint chain_id
+        varchar activity_type
+        varchar order_id
+        varchar counter_order_id
+        varchar collection_address
+        varchar token_id
+        varchar maker
+        varchar taker
+        decimal price
+        bigint block_number
+        varchar tx_hash
+        bigint log_index
+    }
+
+    nft_collections ||--o{ nft_items : "chain_id + collection_address"
+    nft_collections ||--o{ nft_orders : "chain_id + collection_address"
+    nft_collections ||--o{ nft_activities : "chain_id + collection_address"
+
+    nft_items ||--o{ nft_orders : "chain_id + collection_address + token_id"
+    nft_items ||--o{ nft_activities : "chain_id + collection_address + token_id"
+
+    nft_orders ||--o{ nft_activities : "order_id"
+    nft_orders ||--o{ nft_activities : "counter_order_id"
+```
+
+One thing to note that: 
+
+In a traditional transactional app, I’d usually use **foreign keys** for integrity. 
+But in an indexer, the database is a **derived read model** from blockchain events. 
+It is common to use **natural keys and unique indexes** instead of strict foreign keys, because replay, backfill, and high-volume upserts are more important. 
+Integrity is enforced by the indexer logic and can be repaired by reindexing from the source of truth.
+
+
 ## Redis Queues
 
 Redis is not the durable source of truth. In these milestones, it is used for derived background work like floor-price recalculation and order expiry.
